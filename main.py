@@ -13,17 +13,32 @@ class TestBot:
         self.current_question_id = None
         self.current_question = None
         self.current_type = None
+        self.link = None
+        self.user_answers = []
+        self.correct_answers = 0
+        self.current_question_index = 0
+        self.time = 10
 
     def start(self):
+
         @bot.message_handler(commands=['start'])
         def handle_start(message):
-            markup = types.InlineKeyboardMarkup()
-            btn1 = types.InlineKeyboardButton("Создать тест", callback_data='create_test')
-            btn2 = types.InlineKeyboardButton("Мои тесты", callback_data='my_tests')
-            btn3 = types.InlineKeyboardButton("О боте", callback_data='about_bot')
-            markup.row(btn1, btn2)
-            markup.row(btn3)
-            bot.send_message(message.chat.id, 'Добро пожаловать!', reply_markup=markup)
+            if ' ' in message.text:
+                s = message.text.split(' ')
+                test_id = s[-1]
+                # test_id = int(message.text[-1])
+                start_test(message, test_id)
+
+            else:
+                markup = types.InlineKeyboardMarkup()
+                btn1 = types.InlineKeyboardButton("Создать тест", callback_data='create_test')
+                btn2 = types.InlineKeyboardButton("Мои тесты", callback_data='my_tests')
+                btn3 = types.InlineKeyboardButton("О боте", callback_data='about_bot')
+                markup.row(btn1, btn2)
+                markup.row(btn3)
+                bot.send_message(message.chat.id, 'Добро пожаловать!', reply_markup=markup)
+            print(f"Received command: {message.text}")
+
 
         @bot.callback_query_handler(func=lambda call: True)
         def on_click(call):
@@ -37,16 +52,34 @@ class TestBot:
                 skip_description(call.message)
             elif call.data == "input_disc":
                 save_description(call.message)
+            elif call.data == "10":
+                self.time= 10
+                type_question(call.message)
+            elif call.data == "30":
+                self.time = 30
+                type_question(call.message)
+            elif call.data == "1":
+                self.time = 60
+                type_question(call.message)
             elif call.data == "vvod":
-                save_type_question(call.message, "вариант")
-            elif call.data == "variant":
-                save_type_question(call.message, "ввод")
+                save_type_question(call.message, "vvod")
+            elif call.data == "one":
+                save_type_question(call.message, "one")
+            elif call.data == "several":
+                save_type_question(call.message, "several")
             elif call.data == 'add_answer':
                 make_answer(call.message)
             elif call.data == 'make_question':
-                save_question(call.message)
+                type_question(call.message)
             elif call.data == 'done':
                 done_test(call.message)
+            elif call.data == 'share_test':
+                pass
+            elif call.data == 'add_to_group':
+                pass
+            elif call.data == 'take_test':
+                start_test(call.message, self.current_test_id)
+
 
         @bot.message_handler(commands=['test'])
         def handle_test(message):
@@ -70,8 +103,7 @@ class TestBot:
             self.current_test_id = db.save_test(user_id, self.current_test_title, None)
 
             bot.send_message(message.chat.id, f"Тест '{self.current_test_title}' создан без описания.")
-
-            type_question(message)
+            save_link(message)
 
 
         def save_description(message):
@@ -83,13 +115,32 @@ class TestBot:
             description = message.text
             self.current_test_id = db.save_test(message.from_user.id, self.current_test_title, description)
             bot.send_message(message.chat.id, f"Тест '{self.current_test_title}' с описанием '{description}' создан!")
-            type_question(message)
+            save_link(message)
+
+        def save_link(message):
+            t_id = self.current_test_id
+            self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={t_id}"
+            db.save_link(self.link, self.current_test_id)
+            time(message)
+
+        def time(message):
+            markup = types.InlineKeyboardMarkup()
+            ten_button = types.InlineKeyboardButton("10с", callback_data="10")
+            three_button = types.InlineKeyboardButton("30с", callback_data='30')
+            min_button = types.InlineKeyboardButton("1м", callback_data='1')
+            markup.row(ten_button, three_button, min_button)
+            bot.send_message(message.chat.id,
+                             'Сколько времени будет отводиться на один вопрос: 10 секунд, 30 или 1 минута?',
+                             reply_markup=markup)
+
 
         def type_question(message):
             markup = types.InlineKeyboardMarkup()
-            variant_button = types.InlineKeyboardButton("С выбором варианта/вариантов", callback_data='variant')
-            vvod_button = types.InlineKeyboardButton("Ввод ответа", callback_data='vvod')
-            markup.add(variant_button)
+            one_button = types.InlineKeyboardButton("один правильный ответ", callback_data="one")
+            several_button = types.InlineKeyboardButton("несколько правильных ответов", callback_data='several')
+            vvod_button = types.InlineKeyboardButton("ввод с клавиатуры", callback_data='vvod')
+            markup.add(one_button)
+            markup.add(several_button)
             markup.add(vvod_button)
             bot.send_message(message.chat.id, 'Вы можете создать вопрос с вариантами ответа, а можете сделать ввод ответа пользователем',
             reply_markup=markup)
@@ -114,33 +165,121 @@ class TestBot:
             bot.send_message(message.chat.id, "Введите вариант ответа:")
             bot.register_next_step_handler(message, save_answer)
 
+
         def save_answer(message):
-            answer_text = message.text
+            if self.current_type == "vvod":
+                save_answer_in_db(message)
+            else:
+                answer_text = message.text
 
-            markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
-            markup.add('Да', 'Нет')
-            bot.send_message(message.chat.id, "Это правильный ответ?", reply_markup=markup)
+                markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
+                markup.add('Да', 'Нет')
+                bot.send_message(message.chat.id, "Это правильный ответ?", reply_markup=markup)
 
-            bot.register_next_step_handler(message, lambda m: save_answer_in_db(m, answer_text))
+                bot.register_next_step_handler(message, lambda m: save_answer_in_db(m, answer_text))
 
-        def save_answer_in_db(message, answer_text):
-            is_correct = True if message.text.lower() == 'да' else False
+        def save_answer_in_db(message, answer_text = "да"):
+            if message.text.lower() == 'да' or self.current_type == "vvod":
+                is_correct = True
+            else:
+                is_correct = False
+            bot.send_message(message.chat.id, str(is_correct))
             db.save_answer(self.current_question_id, answer_text, is_correct)
 
-            markup = types.InlineKeyboardMarkup()
-            button1 = types.InlineKeyboardButton("Добавить вариант ответа", callback_data='add_answer')
-            button2 = types.InlineKeyboardButton("Создать вопрос", callback_data='make_question')
-            button3 = types.InlineKeyboardButton("Закончить создание теста", callback_data='done')
-            markup.row(button1)
-            markup.row(button2)
-            markup.row(button3)
+            count = db.count_answers_by_question_id(self.current_question_id)
 
-            bot.send_message(message.chat.id,
-            "Вариант ответа сохранен. Вы можете добавить еще один вариант ответа или создать ещё вопрос или закончить создание теста.",
-            reply_markup=markup)
+            if self.current_type != "vvod" and count < 2:
+                markup = types.InlineKeyboardMarkup()
+                button1 = types.InlineKeyboardButton("Добавить вариант ответа", callback_data='add_answer')
+                markup.row(button1)
+                bot.send_message(message.chat.id, "Вариант ответа сохранен. Добавьте ещё вариант ответа для теста",
+                                 reply_markup=markup)
+            elif self.current_type != "vvod":
+                markup = types.InlineKeyboardMarkup()
+                button1 = types.InlineKeyboardButton("Добавить вариант ответа", callback_data='add_answer')
+                button2 = types.InlineKeyboardButton("Создать вопрос", callback_data='make_question')
+                button3 = types.InlineKeyboardButton("Закончить создание теста", callback_data='done')
+                markup.row(button1)
+                markup.row(button2)
+                markup.row(button3)
+                bot.send_message(message.chat.id,
+                "Вариант ответа сохранен. Вы можете добавить еще один вариант ответа или создать ещё вопрос или закончить создание теста.",
+                reply_markup=markup)
+            elif self.current_type == "vvod":
+                markup = types.InlineKeyboardMarkup()
+                button2 = types.InlineKeyboardButton("Создать вопрос", callback_data='make_question')
+                button3 = types.InlineKeyboardButton("Закончить создание теста", callback_data='done')
+                markup.row(button2)
+                markup.row(button3)
+                bot.send_message(message.chat.id,
+                                 "Вариант ответа сохранен. Вы можете создать ещё вопрос или закончить создание теста.",
+                                 reply_markup=markup)
+
 
         def done_test(message):
-            bot.send_message(message.chat.id, "Тест сохранён")
+            markup = types.InlineKeyboardMarkup()
+            share_button = types.InlineKeyboardButton("Поделиться", callback_data='share_test')
+            markup.add(share_button)
+            add_to_group_button = types.InlineKeyboardButton("Добавить в группу", callback_data='add_to_group')
+            markup.add(add_to_group_button)
+            take_test_button = types.InlineKeyboardButton("Пройти тест", callback_data='take_test')
+            markup.add(take_test_button)
+
+            t_id = self.current_test_id
+            bot.send_message(
+                message.chat.id,
+                f"Тест сохранён\nСсылка на тест: <a href='https://t.me/TheCreatorOfTheTestsBot?start={t_id}'>https://t.me/TheCreatorOfTheTestsBot?start={t_id}</a>",
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+
+        def start_test(message, test_id):
+            self.current_question_index = 0
+            if db.test_exists(test_id):
+                bot.send_message(message.chat.id, f"Вы начали тест с ID: {test_id}.")
+                questions = db.get_questions_by_test_id(test_id)
+                send_question(message, questions[self.current_question_index], test_id)
+            else:
+                bot.send_message(message, "Такого теста не существует")
+
+        def send_question(message, question_data, test_id):
+            """Отправляет вопрос пользователю в зависимости от его типа."""
+            question_text = question_data[2]
+            question_type = question_data[3]
+
+            if question_type == "one":
+                options = db.get_answers_by_question_id(question_data[0])
+                option_texts = [option[2] for option in options]
+
+                id_s = db.get_question_ids_by_test_id(test_id)
+                correct = db.get_correct_answer_by_question_id(id_s[self.current_question_index])
+                correct_id = -1
+                for i in range(len(option_texts)):
+                    if option_texts[i] == correct:
+                        correct_id = i
+
+
+                bot.send_poll(message.chat.id, question_text, option_texts, allows_multiple_answers=False, type ='quiz',
+                              correct_option_id= correct_id, open_period=self.time, is_anonymous=False)
+
+
+
+            elif question_type == "several":
+                pass
+
+            elif question_type == "vvod":
+                bot.send_message(message.chat.id, question_text)
+                bot.register_next_step_handler_by_chat_id(message.chat.id, handle_text_answer)
+
+
+        @bot.poll_answer_handler()
+        def handle_poll_answer(poll_answer):
+            print(poll_answer)
+            user_id = poll_answer.user.id
+            bot.send_message(user_id, "Проверка.")
+
+        def handle_text_answer(message):
+            bot.send_message(message.chat.id, "работает...")
 
 
 
