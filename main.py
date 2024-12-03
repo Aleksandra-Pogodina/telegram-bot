@@ -1,4 +1,5 @@
 import telebot
+from pyexpat.errors import messages
 from telebot import types
 import dataBase as db
 
@@ -15,9 +16,11 @@ class TestBot:
         self.current_type = None
         self.link = None
         self.user_answers = []
-        self.correct_answers = 0
+        self.correct_answers_from_user = 0
         self.current_question_index = 0
         self.time = 10
+        self.questions = []
+        self.timer = None
 
     def start(self):
 
@@ -137,8 +140,8 @@ class TestBot:
         def type_question(message):
             markup = types.InlineKeyboardMarkup()
             one_button = types.InlineKeyboardButton("один правильный ответ", callback_data="one")
-            several_button = types.InlineKeyboardButton("несколько правильных ответов", callback_data='several')
-            vvod_button = types.InlineKeyboardButton("ввод с клавиатуры", callback_data='vvod')
+            several_button = types.InlineKeyboardButton("несколько правильных ответов", callback_data="several")
+            vvod_button = types.InlineKeyboardButton("ввод с клавиатуры", callback_data="vvod")
             markup.add(one_button)
             markup.add(several_button)
             markup.add(vvod_button)
@@ -168,7 +171,7 @@ class TestBot:
 
         def save_answer(message):
             if self.current_type == "vvod":
-                save_answer_in_db(message)
+                save_answer_in_db(message, message.text)
             else:
                 answer_text = message.text
 
@@ -235,51 +238,112 @@ class TestBot:
 
         def start_test(message, test_id):
             self.current_question_index = 0
+            self.correct_answers_from_user = 0
             if db.test_exists(test_id):
                 bot.send_message(message.chat.id, f"Вы начали тест с ID: {test_id}.")
-                questions = db.get_questions_by_test_id(test_id)
-                send_question(message, questions[self.current_question_index], test_id)
+                self.questions = db.get_questions_by_test_id(test_id)
+                #print(self.questions)
+                send_question(message, test_id)
             else:
-                bot.send_message(message, "Такого теста не существует")
-
-        def send_question(message, question_data, test_id):
-            """Отправляет вопрос пользователю в зависимости от его типа."""
-            question_text = question_data[2]
-            question_type = question_data[3]
-
-            if question_type == "one":
-                options = db.get_answers_by_question_id(question_data[0])
-                option_texts = [option[2] for option in options]
-
-                id_s = db.get_question_ids_by_test_id(test_id)
-                correct = db.get_correct_answer_by_question_id(id_s[self.current_question_index])
-                correct_id = -1
-                for i in range(len(option_texts)):
-                    if option_texts[i] == correct:
-                        correct_id = i
-
-
-                bot.send_poll(message.chat.id, question_text, option_texts, allows_multiple_answers=False, type ='quiz',
-                              correct_option_id= correct_id, open_period=self.time, is_anonymous=False)
+                bot.send_message(message.chat.id, "Такого теста не существует")
 
 
 
-            elif question_type == "several":
-                pass
+        def send_question(message, test_id):
+            length = len(self.questions)
 
-            elif question_type == "vvod":
-                bot.send_message(message.chat.id, question_text)
-                bot.register_next_step_handler_by_chat_id(message.chat.id, handle_text_answer)
+            if self.current_question_index < length:
+                question_data = self.questions[self.current_question_index]
+                question_text = question_data[2]
+                question_type = question_data[3]
+
+                if question_type == "one":
+                    options = db.get_answers_by_question_id(question_data[0])
+                    option_texts = [option[2] for option in options]
+
+                    id_s = db.get_question_ids_by_test_id(test_id)
+                    correct = db.get_correct_answer_by_question_id(id_s[self.current_question_index])
+                    correct_id = -1
+                    for i in range(len(option_texts)):
+                        if option_texts[i] == correct:
+                            correct_id = i
 
 
-        @bot.poll_answer_handler()
-        def handle_poll_answer(poll_answer):
-            print(poll_answer)
-            user_id = poll_answer.user.id
-            bot.send_message(user_id, "Проверка.")
+                    bot.send_poll(message.chat.id, question_text, option_texts, allows_multiple_answers=False, type ='quiz',
+                                  correct_option_id= correct_id, open_period=self.time, is_anonymous=False)
 
-        def handle_text_answer(message):
-            bot.send_message(message.chat.id, "работает...")
+                    self.current_question_index += 1
+
+                elif question_type == "several":
+                    options = db.get_answers_by_question_id(question_data[0])
+                    option_texts = [option[2] for option in options]
+
+                    id_s = db.get_question_ids_by_test_id(test_id)
+                    correct = db.get_correct_answers_by_question_id(id_s[self.current_question_index])
+
+                    bot.send_poll(message.chat.id, question_text, option_texts, allows_multiple_answers=True, type="regular",
+                                  open_period=self.time, is_anonymous=False)
+
+                    self.current_question_index += 1
+
+
+
+                elif question_type == "vvod":
+                    bot.send_message(message.chat.id, question_text)
+                    bot.register_next_step_handler_by_chat_id(message.chat.id, handle_text_answer, test_id)
+
+
+                @bot.poll_answer_handler()
+                def handle_poll_answer(poll_answer):
+                    if question_type == 'several':
+                        bot.send_message(message.chat.id, "several")
+                        send_question(message, test_id)
+                    else:
+                        bot.send_message(message.chat.id, "one")
+                        send_question(message, test_id)
+
+                ''' @bot.poll_answer_handler()
+                def handle_poll_answer(poll_answer):
+                    print(poll_answer)
+
+
+                    if question_data[3] == "several":
+                        answers_string = '\n'.join(correct)
+                        bot.send_message(message.chat.id, f"Правильные ответы:\n{answers_string}")
+
+                        send_question(message, test_id)
+
+
+                    elif question_data[3] == "one":
+                        bot.send_message(message.chat.id, "зашёл")
+                        if option_texts[poll_answer.option_ids[0]] == correct:
+                            self.correct_answers_from_user += 1
+
+                        send_question(message, test_id)'''
+
+            else:
+                statistic_for_user(message, length)
+
+
+        def handle_text_answer(message, test_id):
+
+            id_s = db.get_question_ids_by_test_id(test_id)
+            correct = db.get_correct_answer_by_question_id(id_s[self.current_question_index])
+            #print(correct)
+            if message.text == correct:
+                bot.send_message(message.chat.id, "Правильный ответ")
+                self.correct_answers_from_user += 1
+            else:
+                bot.send_message(message.chat.id, f"Неверно. Правильный ответ:{correct}")
+
+            self.current_question_index += 1
+            send_question(message, test_id)
+
+        def statistic_for_user(message, total):
+            percent = (self.correct_answers_from_user / total) * 100
+            bot.send_message(message.chat.id, f"Вы ответили на {self.correct_answers_from_user} из {total}.\n"
+                                              f"Таким образом, процент правильных ответов составляет {percent} %.")
+
 
 
 

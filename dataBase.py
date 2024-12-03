@@ -167,6 +167,19 @@ def get_correct_answer_by_question_id(question_id):
 
     return correct_answer[0] if correct_answer else None
 
+def get_correct_answers_by_question_id(question_id):
+    """Возвращает список правильных ответов для данного вопроса по его ID."""
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    # SQL-запрос для получения всех правильных ответов
+    cursor.execute("SELECT answer_text FROM answers WHERE question_id = ? AND is_correct = 1", (question_id,))
+    correct_answers = cursor.fetchall()  # Извлекаем все строки результата
+
+    conn.close()
+
+    return [answer[0] for answer in correct_answers]  # Возвращаем список текстов правильных ответов
+
 
 def is_correct_answer(answer):
     conn = connect_db()
