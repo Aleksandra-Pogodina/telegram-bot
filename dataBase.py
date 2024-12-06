@@ -16,6 +16,7 @@ def create_tables():
                 title TEXT,
                 description TEXT,
                 link TEXT,
+                time INTEGER,
                 FOREIGN KEY (user_id) REFERENCES users(user_id))''')
 
 
@@ -35,13 +36,14 @@ def create_tables():
                 FOREIGN KEY (question_id) REFERENCES questions(question_id))''')
 
 
-    cur.execute('''CREATE TABLE IF NOT EXISTS statistics (
-                    statistic_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    test_id INTEGER,
-                    correct_answers BOOLEAN,
-                    total_questions INTEGER,
-                    FOREIGN KEY (user_id) REFERENCES users(user_id))''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS question_statistics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question_id INTEGER,
+                test_id INTEGER,
+                total_attempts INTEGER DEFAULT 0,
+                correct_attempts INTEGER DEFAULT 0,
+                FOREIGN KEY (question_id) REFERENCES questions(question_id),
+                FOREIGN KEY (test_id) REFERENCES tests(test_id));''')
 
     conn.commit()
     cur.close()
@@ -68,6 +70,13 @@ def save_link(link, test_id):
     conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("UPDATE tests SET link = ? WHERE test_id = ?", (link, test_id))
+    conn.commit()
+    conn.close()
+
+def save_test_time(test_id, time):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tests SET time = ? WHERE test_id = ?", (time, test_id))
     conn.commit()
     conn.close()
 
@@ -140,6 +149,18 @@ def get_questions_by_test_id(test_id):
 
     return questions
 
+def get_test_time(test_id):
+    """Возвращает время теста по test_id из базы данных."""
+    conn = connect_db()  # Подключение к базе данных
+    cursor = conn.cursor()
+    cursor.execute("SELECT time FROM tests WHERE test_id = ?", (test_id,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return result[0]  # Возвращаем значение времени
+    else:
+        return None  # Если тест не найден, возвращаем None
+
 
 def get_answers_by_question_id(question_id):
     """Получает все ответы по ID вопроса."""
@@ -195,13 +216,26 @@ def is_correct_answer(answer):
     return result[0] if result else False
 
 
-def save_statistics(user_id, test_id, correct_answers, total_questions):
-    """Сохраняет статистику прохождения теста в базе данных."""
+def update_question_statistics(question_id, test_id, is_correct):
+    """Обновляет статистику по вопросам в базе данных."""
     conn = connect_db()
     cursor = conn.cursor()
 
-    cursor.execute("INSERT INTO statistics (user_id, test_id, correct_answers, total_questions) VALUES (?, ?, ?, ?)",
-                   (user_id, test_id, correct_answers, total_questions))
+    # Проверяем, существует ли запись для данного вопроса и теста
+    cursor.execute("SELECT total_attempts, correct_attempts FROM question_statistics WHERE question_id = ? AND test_id = ?", (question_id, test_id))
+    result = cursor.fetchone()
+
+    if result:
+        total_attempts, correct_attempts = result
+        total_attempts += 1
+        if is_correct:
+            correct_attempts += 1
+        cursor.execute("UPDATE question_statistics SET total_attempts = ?, correct_attempts = ? WHERE question_id = ? AND test_id = ?", (total_attempts, correct_attempts, question_id, test_id))
+    else:
+        # Если записи нет, создаём новую
+        total_attempts = 1
+        correct_attempts = 1 if is_correct else 0
+        cursor.execute("INSERT INTO question_statistics (question_id, test_id, total_attempts, correct_attempts) VALUES (?, ?, ?, ?)", (question_id, test_id, total_attempts, correct_attempts))
 
     conn.commit()
     conn.close()
