@@ -1,6 +1,13 @@
 import telebot
 from telebot import types
 import dataBase as db
+import matplotlib
+matplotlib.use('Agg')  # Используем бэкенд Agg
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 
 TOKEN = '7952186657:AAFOWLSyUhqdrBFYE4TNajUfXPG3W4g-ETs'
 bot = telebot.TeleBot(TOKEN)
@@ -47,43 +54,58 @@ class TestBot:
 
         @bot.callback_query_handler(func=lambda call: True)
         def on_click(call):
-            if call.data == "create_test":
-                handle_test(call.message)
-            elif call.data == "my_tests":
-                handle_my_tests(call.message)
-            elif call.data == "about_bot":
-                handle_about_bot(call.message)
-            elif call.data == 'skip_description':
-                skip_description(call.message)
-            elif call.data == "input_disc":
-                save_description(call.message)
-            elif call.data == "10":
-                self.time= 10
-                save_time(call.message)
-            elif call.data == "30":
-                self.time = 30
-                save_time(call.message)
-            elif call.data == "1":
-                self.time = 60
-                save_time(call.message)
-            elif call.data == "vvod":
-                save_type_question(call.message, "vvod")
-            elif call.data == "one":
-                save_type_question(call.message, "one")
-            elif call.data == "several":
-                save_type_question(call.message, "several")
-            elif call.data == 'add_answer':
-                make_answer(call.message)
-            elif call.data == 'make_question':
-                type_question(call.message)
-            elif call.data == 'done':
-                done_test(call.message)
-            elif call.data == 'share_test':
-                pass
-            elif call.data == 'add_to_group':
-                pass
-            elif call.data == 'take_test':
-                start_test(call.message, self.current_test_id)
+            # Обработка нажатий на кнопки с test_id
+            if call.data.startswith('test_'):
+                test_id = int(call.data.split('_')[1])  # Извлекаем test_id из callback_data
+                about_test(call.message, test_id)  # Запускаем выбранный тест
+            elif call.data.startswith('edit_test_'):
+                test_id = int(call.data.split('_')[2])
+            elif call.data.startswith('statistics_'):
+                test_id = int(call.data.split('_')[1])
+                view_statistics(call.message, test_id)
+            elif call.data.startswith('statisticsexcel_'):
+                test_id = int(call.data.split('_')[1])
+                send_excel(call.message, test_id)
+            else:
+                if call.data == "create_test":
+                    handle_test(call.message)
+                elif call.data == "my_tests":
+                    handle_my_tests(call.message)
+                elif call.data == "about_bot":
+                    handle_about_bot(call.message)
+                elif call.data == 'skip_description':
+                    skip_description(call.message)
+                elif call.data == "input_disc":
+                    save_description(call.message)
+                elif call.data == "10":
+                    self.time= 10
+                    save_time(call.message)
+                elif call.data == "30":
+                    self.time = 30
+                    save_time(call.message)
+                elif call.data == "1":
+                    self.time = 60
+                    save_time(call.message)
+                elif call.data == "vvod":
+                    save_type_question(call.message, "vvod")
+                elif call.data == "one":
+                    save_type_question(call.message, "one")
+                elif call.data == "several":
+                    save_type_question(call.message, "several")
+                elif call.data == 'add_answer':
+                    make_answer(call.message)
+                elif call.data == 'make_question':
+                    type_question(call.message)
+                elif call.data == 'done':
+                    done_test(call.message)
+                elif call.data == 'share_test':
+                    pass
+                elif call.data == 'add_to_group':
+                    pass
+                elif call.data == 'take_test':
+                    start_test(call.message, self.current_test_id)
+
+
 
 
         @bot.message_handler(commands=['test'])
@@ -194,7 +216,7 @@ class TestBot:
                 is_correct = True
             else:
                 is_correct = False
-            bot.send_message(message.chat.id, str(is_correct))
+            #bot.send_message(message.chat.id, str(is_correct))
             db.save_answer(self.current_question_id, answer_text, is_correct)
 
             count = db.count_answers_by_question_id(self.current_question_id)
@@ -260,6 +282,7 @@ class TestBot:
             self.time = db.get_test_time(test_id)
             if db.test_exists(test_id):
                 bot.send_message(message.chat.id, f"Вы начали тест с ID: {test_id}.")
+                db.increment_started_count(test_id)
                 self.questions = db.get_questions_by_test_id(test_id)
                 send_question(message, test_id)
             else:
@@ -341,14 +364,15 @@ class TestBot:
                         send_question(message, test_id)
 
             else:
-                statistic_for_user(message, length)
+                db.increment_completed_count(test_id)
+                statistic_for_user(message, length, test_id)
 
 
 
         def handle_text_answer(message, test_id):
 
-            id_s = db.get_question_ids_by_test_id(test_id)
-            self.correct = db.get_correct_answer_by_question_id(id_s[self.current_question_index])
+            #id_s = db.get_question_ids_by_test_id(test_id)
+            self.correct = db.get_correct_answer_by_question_id(self.question_data[0])
             if message.text.lower() == self.correct:
                 db.update_question_statistics(self.question_data[0], test_id, True)
                 bot.send_message(message.chat.id, "Правильный ответ")
@@ -362,26 +386,235 @@ class TestBot:
             self.current_question_index += 1
             send_question(message, test_id)
 
-        def statistic_for_user(message, total):
+        def statistic_for_user(message, total, test_id):
             percent = round((self.correct_answers_from_user / total) * 100, 2)
             bot.send_message(message.chat.id, f"Вы ответили на {self.correct_answers_from_user} из {total}.\n"
                                               f"Таким образом, Вы ответили верно на {percent}% вопросов.")
 
 
+        def create_histogram(statistics, test_title):
+            """Создает гистограмму успешности вопросов."""
+            labels = []
+            success_rates = []
+
+            for index, (question_id, success_rate) in enumerate(statistics):
+                labels.append(f"Вопрос {index + 1}")  # Нумерация вопросов от 1
+                success_rates.append(success_rate)
+
+            plt.figure(figsize=(10, 6))
+            bars = plt.bar(labels, success_rates, color='orange')
+            #plt.xlabel('Вопросы')
+            plt.ylabel('Процент успешности (%)')
+            plt.title(f"Статистика успешности по тесту: {test_title}")
+            plt.xticks(rotation=45)  # Поворачиваем метки по оси X для лучшей читаемости
+            plt.ylim(0, 100)  # Устанавливаем пределы по оси Y от 0 до 100
+
+            # Добавляем проценты на столбиках
+            for bar in bars:
+                yval = bar.get_height()  # Высота столбика
+                plt.text(bar.get_x() + bar.get_width() / 2, yval, f'{yval:.1f}%', ha='center',
+                         va='bottom')  # Добавляем текст
+
+            # Сохраняем гистограмму в файл
+            chart_filename = "test_statistics_histogram.png"
+            plt.tight_layout()  # Автоматически подгоняем размеры графика
+            plt.savefig(chart_filename)
+            plt.close()  # Закрываем фигуру, чтобы не занимать память
+
+            return chart_filename
+
+        #@bot.message_handler(commands=['view_statistics'])
+        def view_statistics(message, test_id):
+            statistics = db.get_test_statistics(test_id)
+
+            if not statistics:
+                bot.send_message(message.chat.id, "Нет доступной статистики для этого теста.")
+                return
+
+            test_title = db.get_test_title_by_id(test_id)
+
+            # Создаем круговую диаграмму
+            chart_filename = create_histogram(statistics, test_title)
+
+            # Отправляем изображение пользователю
+            with open(chart_filename, 'rb') as chart_file:
+                bot.send_photo(message.chat.id, chart_file)
+
+            show_test_statistics(message, test_id)
 
 
+        def create_test_statistics_pie_chart(started_count, completed_count, test_title):
+            """Создает круговую диаграмму статистики по тесту."""
+            labels = ['Завершили тест', 'Не завершили тест']
+            sizes = [completed_count, started_count - completed_count]
 
+            colors = ['orange', 'grey']  # Зеленый для завершивших и красный для не завершивших
+            plt.figure(figsize=(8, 8))
+            wedges, texts, autotexts = plt.pie(sizes, labels=labels, colors=colors, autopct='', startangle=140)
+            plt.axis('equal')  # Равные оси для круга
+            plt.title(f"Статистика по тесту: {test_title}")
 
+            # Добавляем текст с количеством и процентом на диаграмму
+            for i, wedge in enumerate(wedges):
+                angle = (wedge.theta2 + wedge.theta1) / 2.0  # Находим угол для размещения текста
+                x = wedge.r * 0.6 * np.cos(np.deg2rad(angle))  # Позиция по оси X
+                y = wedge.r * 0.6 * np.sin(np.deg2rad(angle))  # Позиция по оси Y
+                count = sizes[i]
+                percentage = count / started_count * 100
+                plt.text(x, y, f'{count} ({percentage:.1f}%)', ha='center', va='center')
 
+            # Сохраняем диаграмму в файл
+            chart_filename = "test_statistics_pie_chart.png"
+            plt.savefig(chart_filename)
+            plt.close()  # Закрываем фигуру, чтобы не занимать память
 
+            return chart_filename
 
+        def show_test_statistics(message, test_id):
+            statistics = db.get_test_statistics_pie(test_id)  # Получаем статистику
+            if statistics:
+                started_count = statistics['started']
+                completed_count = statistics['completed']
+                test_title = db.get_test_title_by_id(test_id)  # Получаем название теста
 
+                # Создаем круговую диаграмму
+                chart_filename = create_test_statistics_pie_chart(started_count, completed_count, test_title)
 
+                # Отправляем изображение пользователю
+                with open(chart_filename, 'rb') as chart_file:
+                    bot.send_photo(message.chat.id, chart_file)
+            else:
+                bot.send_message(message.chat.id, "Нет доступной статистики для этого теста.")
+            send_button(message, test_id)
 
+        def send_button(message, test_id):
+            markup = types.InlineKeyboardMarkup()
+            button = types.InlineKeyboardButton("<<к меню теста", callback_data=f'test_{test_id}')
+            markup.add(button)
+            bot.send_message(message.chat.id, "Вернуться к тесту:", reply_markup=markup)
 
         @bot.message_handler(commands=['my_tests'])
         def handle_my_tests(message):
-            bot.send_message(message.chat.id, "Ваши тесты... {в разработке}")
+            user_id = message.from_user.id  # Получаем ID пользователя
+            tests = db.get_user_tests(user_id)  # Получаем список тестов
+
+            if tests:
+                markup = types.InlineKeyboardMarkup()
+                for test_id, title in tests:
+                    # Создаем кнопку для каждого теста
+                    button = types.InlineKeyboardButton(title, callback_data=f'test_{test_id}')
+                    markup.add(button)
+
+                button = types.InlineKeyboardButton("СОЗДАТЬ НОВЫЙ ТЕСТ", callback_data='create_test')
+                markup.add(button)
+
+                bot.send_message(message.chat.id, "Ваши тесты:", reply_markup=markup)
+            else:
+                markup = types.InlineKeyboardMarkup()
+                button = types.InlineKeyboardButton("СОЗДАТЬ НОВЫЙ ТЕСТ", callback_data='create_test')
+                markup.add(button)
+                bot.send_message(message.chat.id, "У вас нет созданных тестов.", reply_markup=markup)
+
+        def about_test(message, test_id):
+            test_info, question_count = db.get_test_info(test_id)  # Получаем информацию о тесте
+
+            if test_info:
+                title, time_per_question = test_info
+                message_text = (
+                    f"Название теста: {title}\n"
+                    f"Количество вопросов: {question_count}\n"
+                    f"Время на каждый вопрос: {time_per_question} секунд"
+                )
+
+                # Создаем кнопки для дальнейших действий
+                markup = types.InlineKeyboardMarkup()
+                edit_button = types.InlineKeyboardButton("Редактировать", callback_data=f'edit_test_{test_id}')
+                statistics_button = types.InlineKeyboardButton("Статистика", callback_data=f'statistics_{test_id}')
+                excel_button = types.InlineKeyboardButton("Статистика в Excel", callback_data=f'statisticsexcel_{test_id}')
+
+                markup.add(edit_button, statistics_button, excel_button)
+                bot.send_message(message.chat.id, message_text, reply_markup=markup)
+
+            else:
+                bot.send_message(message.chat.id, "Не удалось получить информацию о тесте.")
+
+        def export_test_statistics_to_excel(test_id):
+            """Экспортирует статистику теста в Excel файл по заданному test_id."""
+            # Список для хранения данных
+            data = []
+
+            # Получаем название теста
+            title = db.get_test_title_by_id(test_id)
+
+            # Получаем статистику по тесту
+            started_count = db.get_started_count(test_id)  # Количество начавших тест
+            completed_count = db.get_completed_count(test_id)  # Количество завершивших тест
+
+            # Получаем вопросы и их статистику
+            questions = db.get_questions_by_test_id(test_id)  # Получаем вопросы по ID теста
+
+            # Добавляем информацию о тесте в первую строку
+            data.append({
+                'Название теста': title,
+                'Число, смотревших тест': started_count,
+                'Число, завершивших тест': completed_count,
+                'Вопрос': '',
+                'Число, ответивших на вопрос': '',
+                'Число, верно ответивших': ''
+            })
+
+            for question in questions:
+                question_id = question[0]  # Используем числовой индекс для доступа к question_id
+                question_text = question[2]  # Используем числовой индекс для доступа к тексту вопроса
+                answered_count = db.get_answered_count(question_id)  # Количество ответивших на вопрос
+                correct_count = db.get_correct_answered_count(question_id)  # Количество ответивших верно
+
+                # Добавляем данные о вопросе в список
+                data.append({
+                    'Название теста': '',  # Оставляем пустым, чтобы не дублировать название
+                    'Число, смотревших тест': '',
+                    'Число, завершивших тест': '',
+                    'Вопрос': question_text,
+                    'Число, ответивших на вопрос': answered_count,
+                    'Число, верно ответивших': correct_count,
+                })
+
+            # Создаем DataFrame из списка данных
+            df = pd.DataFrame(data)
+
+            # Сохраняем DataFrame в Excel файл
+            excel_filename = f"test_statistics_{test_id}.xlsx"  # Уникальное имя файла для каждого теста
+
+            with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False)
+
+                # Получаем доступ к рабочему листу для изменения ширины колонок
+                worksheet = writer.sheets['Sheet1']
+
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = get_column_letter(column[0].column)  # Получаем букву колонки
+
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+
+                    adjusted_width = (max_length + 2)  # Устанавливаем ширину колонки с небольшим запасом
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+
+            return excel_filename  # Возвращаем имя файла для дальнейшего использования
+
+        def send_excel(message, test_id):
+            # Экспортируем статистику в Excel
+            excel_file = export_test_statistics_to_excel(test_id)
+
+            # Отправляем файл пользователю
+            with open(excel_file, 'rb') as file:
+                bot.send_document(message.chat.id, file)
+
 
         @bot.message_handler(commands=['about_bot'])
         def handle_about_bot(message):
