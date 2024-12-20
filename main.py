@@ -1,4 +1,5 @@
 import telebot
+from pyexpat.errors import messages
 from telebot import types
 import dataBase as db
 import matplotlib
@@ -8,10 +9,12 @@ import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
+import time
 
 TOKEN = '7952186657:AAFOWLSyUhqdrBFYE4TNajUfXPG3W4g-ETs'
 bot = telebot.TeleBot(TOKEN)
 db.create_tables()
+
 
 class TestBot:
     def __init__(self):
@@ -24,12 +27,15 @@ class TestBot:
         self.user_answers = []
         self.correct_answers_from_user = 0
         self.current_question_index = 0
-        self.time = 10
+        self.clock = 10
         self.questions = []
         self.timer = None
         self.question_type = None
         self.correct = None
         self.question_data = None
+        self.edit = None
+
+
 
     def start(self):
 
@@ -38,7 +44,6 @@ class TestBot:
             if ' ' in message.text:
                 s = message.text.split(' ')
                 test_id = s[-1]
-                # test_id = int(message.text[-1])
                 start_test(message, test_id)
 
             else:
@@ -49,23 +54,53 @@ class TestBot:
                 markup.row(btn1, btn2)
                 markup.row(btn3)
                 bot.send_message(message.chat.id, 'Добро пожаловать!', reply_markup=markup)
-            print(f"Received command: {message.text}")
 
 
         @bot.callback_query_handler(func=lambda call: True)
         def on_click(call):
-            # Обработка нажатий на кнопки с test_id
             if call.data.startswith('test_'):
-                test_id = int(call.data.split('_')[1])  # Извлекаем test_id из callback_data
-                about_test(call.message, test_id)  # Запускаем выбранный тест
+                test_id = int(call.data.split('_')[1])
+                about_test(call.message, test_id)
             elif call.data.startswith('edit_test_'):
                 test_id = int(call.data.split('_')[2])
+                edit_menu(call.message, test_id)
             elif call.data.startswith('statistics_'):
                 test_id = int(call.data.split('_')[1])
                 view_statistics(call.message, test_id)
             elif call.data.startswith('statisticsexcel_'):
                 test_id = int(call.data.split('_')[1])
                 send_excel(call.message, test_id)
+            elif call.data.startswith('editTitle_'):
+                test_id = int(call.data.split('_')[1])
+                edit_title(call.message, test_id)
+            elif call.data.startswith('editDescription_'):
+                test_id = int(call.data.split('_')[1])
+                edit_description(call.message, test_id)
+            elif call.data.startswith('editTimer_'):
+                test_id = int(call.data.split('_')[1])
+                edit_timer(call.message, test_id)
+            elif call.data.startswith('time_'):
+                timer = int(call.data.split('_')[1])
+                test_id = int(call.data.split('_')[2])
+                save_new_time(call.message, timer, test_id)
+            elif call.data.startswith('editQuestion_'):
+                self.edit = None
+                test_id = int(call.data.split('_')[1])
+                edit_question(call.message, test_id)
+            elif call.data.startswith("addQuestion_"):
+                self.current_test_id = int(call.data.split('_')[1])
+                self.edit = True
+                type_question(call.message)
+            elif call.data.startswith("delQuestion_"):
+                test_id = int(call.data.split('_')[1])
+                choose_question_to_delete(call.message, test_id)
+            elif call.data.startswith("question_"):
+                question_id = int(call.data.split('_')[1])
+                test_id = int(call.data.split('_')[2])
+                delete_question(call.message, question_id, test_id)
+            elif call.data.startswith('goTest_'):
+                test_id = int(call.data.split('_')[1])
+                start_test(call.message, test_id)
             else:
                 if call.data == "create_test":
                     handle_test(call.message)
@@ -78,13 +113,13 @@ class TestBot:
                 elif call.data == "input_disc":
                     save_description(call.message)
                 elif call.data == "10":
-                    self.time= 10
+                    self.clock= 10
                     save_time(call.message)
                 elif call.data == "30":
-                    self.time = 30
+                    self.clock = 30
                     save_time(call.message)
                 elif call.data == "1":
-                    self.time = 60
+                    self.clock = 60
                     save_time(call.message)
                 elif call.data == "vvod":
                     save_type_question(call.message, "vvod")
@@ -98,19 +133,15 @@ class TestBot:
                     type_question(call.message)
                 elif call.data == 'done':
                     done_test(call.message)
-                elif call.data == 'share_test':
-                    pass
-                elif call.data == 'add_to_group':
-                    pass
                 elif call.data == 'take_test':
                     start_test(call.message, self.current_test_id)
 
 
 
 
-        @bot.message_handler(commands=['test'])
+        @bot.message_handler(commands=['create_test'])
         def handle_test(message):
-            db.add_user(message.from_user.id)
+            db.add_user(message.chat.id)
             bot.send_message(message.chat.id, "Введите название теста.")
             bot.register_next_step_handler(message, save_test_title)
 
@@ -126,7 +157,7 @@ class TestBot:
 
 
         def skip_description(message):
-            user_id = message.from_user.id
+            user_id = message.chat.id
             self.current_test_id = db.save_test(user_id, self.current_test_title, None)
 
             bot.send_message(message.chat.id, f"Тест '{self.current_test_title}' создан без описания.")
@@ -148,22 +179,22 @@ class TestBot:
             t_id = self.current_test_id
             self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={t_id}"
             db.save_link(self.link, self.current_test_id)
-            time(message)
+            clock(message)
 
-        def time(message):
+        def clock(message):
             markup = types.InlineKeyboardMarkup()
             ten_button = types.InlineKeyboardButton("10с", callback_data="10")
             three_button = types.InlineKeyboardButton("30с", callback_data='30')
             min_button = types.InlineKeyboardButton("1м", callback_data='1')
             markup.row(ten_button, three_button, min_button)
             bot.send_message(message.chat.id,
-                             'Сколько времени будет отводиться на один вопрос: 10 секунд, 30 или 1 минута?',
+                             'Сколько времени будет отводиться на один вопрос: 10 секунд, 30 секунд или 1 минута?',
                              reply_markup=markup)
 
 
         def save_time(message):
             t_id = self.current_test_id
-            db.save_test_time(t_id, self.time)
+            db.save_test_time(t_id, self.clock)
             type_question(message)
 
 
@@ -216,7 +247,7 @@ class TestBot:
                 is_correct = True
             else:
                 is_correct = False
-            #bot.send_message(message.chat.id, str(is_correct))
+
             db.save_answer(self.current_question_id, answer_text, is_correct)
 
             count = db.count_answers_by_question_id(self.current_question_id)
@@ -228,33 +259,47 @@ class TestBot:
                 bot.send_message(message.chat.id, "Вариант ответа сохранен. Добавьте ещё вариант ответа для теста",
                                  reply_markup=markup)
             elif self.current_type != "vvod":
-                markup = types.InlineKeyboardMarkup()
-                button1 = types.InlineKeyboardButton("Добавить вариант ответа", callback_data='add_answer')
-                button2 = types.InlineKeyboardButton("Создать вопрос", callback_data='make_question')
-                button3 = types.InlineKeyboardButton("Закончить создание теста", callback_data='done')
-                markup.row(button1)
-                markup.row(button2)
-                markup.row(button3)
-                bot.send_message(message.chat.id,
-                "Вариант ответа сохранен. Вы можете добавить еще один вариант ответа или создать ещё вопрос или закончить создание теста.",
-                reply_markup=markup)
+                if self.edit:
+                    markup = types.InlineKeyboardMarkup()
+                    button1 = types.InlineKeyboardButton("Добавить вариант ответа", callback_data='add_answer')
+                    button2 = types.InlineKeyboardButton("Закончить создание вопроса", callback_data=f'editQuestion_{self.current_test_id}')
+                    markup.row(button1)
+                    markup.row(button2)
+                    bot.send_message(message.chat.id,
+                                     "Вариант ответа сохранен. Вы можете добавить еще один вариант ответа или закончить создание вопроса.",
+                                     reply_markup=markup)
+                else:
+                    markup = types.InlineKeyboardMarkup()
+                    button1 = types.InlineKeyboardButton("Добавить вариант ответа", callback_data='add_answer')
+                    button2 = types.InlineKeyboardButton("Создать вопрос", callback_data='make_question')
+                    button3 = types.InlineKeyboardButton("Закончить создание теста", callback_data='done')
+                    markup.row(button1)
+                    markup.row(button2)
+                    markup.row(button3)
+                    bot.send_message(message.chat.id,
+                    "Вариант ответа сохранен. Вы можете добавить еще один вариант ответа или создать ещё вопрос или закончить создание теста.",
+                    reply_markup=markup)
             elif self.current_type == "vvod":
-                markup = types.InlineKeyboardMarkup()
-                button2 = types.InlineKeyboardButton("Создать вопрос", callback_data='make_question')
-                button3 = types.InlineKeyboardButton("Закончить создание теста", callback_data='done')
-                markup.row(button2)
-                markup.row(button3)
-                bot.send_message(message.chat.id,
-                                 "Вариант ответа сохранен. Вы можете создать ещё вопрос или закончить создание теста.",
-                                 reply_markup=markup)
+                if self.edit:
+                    markup = types.InlineKeyboardMarkup()
+                    button1 = types.InlineKeyboardButton("Закончить создание вопроса", callback_data=f'editQuestion_{self.current_test_id}')
+                    markup.row(button1)
+                    bot.send_message(message.chat.id,
+                                     "Вариант ответа сохранен. Вы можете закончить создание вопроса.",
+                                     reply_markup=markup)
+                else:
+                    markup = types.InlineKeyboardMarkup()
+                    button2 = types.InlineKeyboardButton("Создать вопрос", callback_data='make_question')
+                    button3 = types.InlineKeyboardButton("Закончить создание теста", callback_data='done')
+                    markup.row(button2)
+                    markup.row(button3)
+                    bot.send_message(message.chat.id,
+                                     "Вариант ответа сохранен. Вы можете создать ещё вопрос или закончить создание теста.",
+                                     reply_markup=markup)
 
 
         def done_test(message):
             markup = types.InlineKeyboardMarkup()
-            share_button = types.InlineKeyboardButton("Поделиться", callback_data='share_test')
-            markup.add(share_button)
-            add_to_group_button = types.InlineKeyboardButton("Добавить в группу", callback_data='add_to_group')
-            markup.add(add_to_group_button)
             take_test_button = types.InlineKeyboardButton("Пройти тест", callback_data='take_test')
             markup.add(take_test_button)
 
@@ -279,29 +324,31 @@ class TestBot:
             self.correct_answers_from_user = 0
             self.correct = None
             self.question_data = None
-            self.time = db.get_test_time(test_id)
+            self.clock = db.get_test_time(test_id)
             if db.test_exists(test_id):
-                bot.send_message(message.chat.id, f"Вы начали тест с ID: {test_id}.")
+                test_time = db.get_test_time(test_id)
+                test_title = db.get_test_title_by_id(test_id)
+                bot.send_message(message.chat.id, f"Вы начали тест '{test_title}'\n\nВремени на вопрос: {test_time} секунд")
                 db.increment_started_count(test_id)
                 self.questions = db.get_questions_by_test_id(test_id)
                 send_question(message, test_id)
             else:
                 bot.send_message(message.chat.id, "Такого теста не существует")
 
+
         def send_question(message, test_id):
             length = len(self.questions)
 
             if self.current_question_index < length:
+
                 self.question_data = self.questions[self.current_question_index]
                 question_text = self.question_data[2]
                 self.question_type = self.question_data[3]
-
 
                 if self.question_type == "one":
                     options = db.get_answers_by_question_id(self.question_data[0])
                     self.option_texts = [option[2] for option in options]
 
-                    #id_s = db.get_question_ids_by_test_id(test_id)
                     self.correct = db.get_correct_answer_by_question_id(self.question_data[0])
 
                     if self.correct in self.option_texts:
@@ -310,26 +357,24 @@ class TestBot:
                     self.current_question_index += 1
 
                     bot.send_poll(message.chat.id, question_text, self.option_texts, allows_multiple_answers=False,
-                                  type='quiz', correct_option_id=correct_id, open_period=self.time, is_anonymous=False)
+                                  type='quiz', correct_option_id=correct_id, open_period=self.clock, is_anonymous=False)
 
 
                 elif self.question_type == "several":
                     options = db.get_answers_by_question_id(self.question_data[0])
                     self.option_texts = [option[2] for option in options]
 
-                    #id_s = db.get_question_ids_by_test_id(test_id)
                     self.correct = db.get_correct_answers_by_question_id(self.question_data[0])
 
                     self.current_question_index += 1
 
                     bot.send_poll(message.chat.id, question_text, self.option_texts, allows_multiple_answers=True,
-                                  type="regular", open_period=self.time, is_anonymous=False)
+                                  type="regular", open_period=self.clock, is_anonymous=False)
 
 
                 elif self.question_type == "vvod":
                     bot.send_message(message.chat.id, question_text)
                     bot.register_next_step_handler_by_chat_id(message.chat.id, handle_text_answer, test_id)
-
 
 
                 @bot.poll_answer_handler()
@@ -370,8 +415,6 @@ class TestBot:
 
 
         def handle_text_answer(message, test_id):
-
-            #id_s = db.get_question_ids_by_test_id(test_id)
             self.correct = db.get_correct_answer_by_question_id(self.question_data[0])
             if message.text.lower() == self.correct:
                 db.update_question_statistics(self.question_data[0], test_id, True)
@@ -381,14 +424,13 @@ class TestBot:
                 db.update_question_statistics(self.question_data[0], test_id, False)
                 bot.send_message(message.chat.id, f"Неверно. Правильный ответ: {self.correct}")
 
-
-
             self.current_question_index += 1
             send_question(message, test_id)
 
+
         def statistic_for_user(message, total, test_id):
             percent = round((self.correct_answers_from_user / total) * 100, 2)
-            bot.send_message(message.chat.id, f"Вы ответили на {self.correct_answers_from_user} из {total}.\n"
+            bot.send_message(message.chat.id, f"Вы ответили верно на {self.correct_answers_from_user} из {total} вопросов.\n"
                                               f"Таким образом, Вы ответили верно на {percent}% вопросов.")
 
 
@@ -403,17 +445,17 @@ class TestBot:
 
             plt.figure(figsize=(10, 6))
             bars = plt.bar(labels, success_rates, color='orange')
-            #plt.xlabel('Вопросы')
+
             plt.ylabel('Процент успешности (%)')
-            plt.title(f"Статистика успешности по тесту: {test_title}")
+            plt.title(f"Статистика успешности по тесту: {test_title}", pad=40)  # Увеличиваем отступ заголовка
             plt.xticks(rotation=45)  # Поворачиваем метки по оси X для лучшей читаемости
             plt.ylim(0, 100)  # Устанавливаем пределы по оси Y от 0 до 100
 
             # Добавляем проценты на столбиках
             for bar in bars:
                 yval = bar.get_height()  # Высота столбика
-                plt.text(bar.get_x() + bar.get_width() / 2, yval, f'{yval:.1f}%', ha='center',
-                         va='bottom')  # Добавляем текст
+                plt.text(bar.get_x() + bar.get_width() / 2, yval - 5, f'{yval:.1f}%', ha='center',
+                         va='top')  # Сдвигаем текст вниз
 
             # Сохраняем гистограмму в файл
             chart_filename = "test_statistics_histogram.png"
@@ -423,12 +465,14 @@ class TestBot:
 
             return chart_filename
 
-        #@bot.message_handler(commands=['view_statistics'])
         def view_statistics(message, test_id):
             statistics = db.get_test_statistics(test_id)
 
             if not statistics:
-                bot.send_message(message.chat.id, "Нет доступной статистики для этого теста.")
+                markup = types.InlineKeyboardMarkup()
+                button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'test_{test_id}')
+                markup.add(button)
+                bot.send_message(message.chat.id, "Нет доступной статистики для этого теста.", reply_markup=markup)
                 return
 
             test_title = db.get_test_title_by_id(test_id)
@@ -443,25 +487,49 @@ class TestBot:
             show_test_statistics(message, test_id)
 
 
+
         def create_test_statistics_pie_chart(started_count, completed_count, test_title):
             """Создает круговую диаграмму статистики по тесту."""
-            labels = ['Завершили тест', 'Не завершили тест']
-            sizes = [completed_count, started_count - completed_count]
+            labels = []
+            sizes = []
 
-            colors = ['orange', 'grey']  # Зеленый для завершивших и красный для не завершивших
+            # Определяем, какие данные добавлять
+            if completed_count > 0:
+                labels.append('Завершили тест')
+                sizes.append(completed_count)
+
+            if started_count - completed_count > 0:
+                labels.append('Не завершили тест')
+                sizes.append(started_count - completed_count)
+
+            # Проверяем, есть ли данные для отображения
+            if not sizes:
+                print("Нет данных для отображения.")
+                return None  # Или можно вернуть какое-то значение по умолчанию
+
+            colors = ['orange', 'grey']  # Цвета для завершивших и не завершивших
             plt.figure(figsize=(8, 8))
+
             wedges, texts, autotexts = plt.pie(sizes, labels=labels, colors=colors, autopct='', startangle=140)
             plt.axis('equal')  # Равные оси для круга
-            plt.title(f"Статистика по тесту: {test_title}")
+            plt.title(f"Статистика по тесту: {test_title}", pad=20)
 
-            # Добавляем текст с количеством и процентом на диаграмму
-            for i, wedge in enumerate(wedges):
-                angle = (wedge.theta2 + wedge.theta1) / 2.0  # Находим угол для размещения текста
-                x = wedge.r * 0.6 * np.cos(np.deg2rad(angle))  # Позиция по оси X
-                y = wedge.r * 0.6 * np.sin(np.deg2rad(angle))  # Позиция по оси Y
-                count = sizes[i]
-                percentage = count / started_count * 100
-                plt.text(x, y, f'{count} ({percentage:.1f}%)', ha='center', va='center')
+            total = started_count  # Общее количество участников теста
+            if total == 0:
+                plt.text(0, 0, 'Нет участников', ha='center', va='center', fontsize=20)
+            else:
+                for i, wedge in enumerate(wedges):
+                    count = sizes[i]
+                    percentage = count / total * 100 if total > 0 else 0
+
+                    # Если один из секторов равен нулю, выводим текст в центре
+                    if count == 0:
+                        plt.text(0, 0, f'{total} (0.0%)', ha='center', va='center', fontsize=20)
+                    else:
+                        angle = (wedge.theta2 + wedge.theta1) / 2.0  # Находим угол для размещения текста
+                        x = wedge.r * 0.6 * np.cos(np.deg2rad(angle))  # Позиция по оси X
+                        y = wedge.r * 0.6 * np.sin(np.deg2rad(angle))  # Позиция по оси Y
+                        plt.text(x, y, f'{count} ({percentage:.1f}%)', ha='center', va='center')
 
             # Сохраняем диаграмму в файл
             chart_filename = "test_statistics_pie_chart.png"
@@ -484,18 +552,22 @@ class TestBot:
                 with open(chart_filename, 'rb') as chart_file:
                     bot.send_photo(message.chat.id, chart_file)
             else:
-                bot.send_message(message.chat.id, "Нет доступной статистики для этого теста.")
+                markup = types.InlineKeyboardMarkup()
+                button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'test_{test_id}')
+                markup.add(button)
+                bot.send_message(message.chat.id, "Нет доступной статистики для этого теста.", reply_markup=markup)
+
             send_button(message, test_id)
 
         def send_button(message, test_id):
             markup = types.InlineKeyboardMarkup()
-            button = types.InlineKeyboardButton("<<к меню теста", callback_data=f'test_{test_id}')
+            button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'test_{test_id}')
             markup.add(button)
             bot.send_message(message.chat.id, "Вернуться к тесту:", reply_markup=markup)
 
         @bot.message_handler(commands=['my_tests'])
         def handle_my_tests(message):
-            user_id = message.from_user.id  # Получаем ID пользователя
+            user_id = message.chat.id  # Получаем ID пользователя
             tests = db.get_user_tests(user_id)  # Получаем список тестов
 
             if tests:
@@ -505,10 +577,10 @@ class TestBot:
                     button = types.InlineKeyboardButton(title, callback_data=f'test_{test_id}')
                     markup.add(button)
 
-                button = types.InlineKeyboardButton("СОЗДАТЬ НОВЫЙ ТЕСТ", callback_data='create_test')
-                markup.add(button)
-
+                button_c = types.InlineKeyboardButton("СОЗДАТЬ НОВЫЙ ТЕСТ", callback_data='create_test')
+                markup.add(button_c)
                 bot.send_message(message.chat.id, "Ваши тесты:", reply_markup=markup)
+
             else:
                 markup = types.InlineKeyboardMarkup()
                 button = types.InlineKeyboardButton("СОЗДАТЬ НОВЫЙ ТЕСТ", callback_data='create_test')
@@ -519,11 +591,13 @@ class TestBot:
             test_info, question_count = db.get_test_info(test_id)  # Получаем информацию о тесте
 
             if test_info:
-                title, time_per_question = test_info
+                title, time_per_question, description, link = test_info
                 message_text = (
-                    f"Название теста: {title}\n"
+                    f"Название: {title}\n"
+                    f"Описание: {description}\n"
                     f"Количество вопросов: {question_count}\n"
-                    f"Время на каждый вопрос: {time_per_question} секунд"
+                    f"Время на каждый вопрос: {time_per_question} секунд\n"
+                    f"Ссылка на тест: {link}"
                 )
 
                 # Создаем кнопки для дальнейших действий
@@ -531,8 +605,11 @@ class TestBot:
                 edit_button = types.InlineKeyboardButton("Редактировать", callback_data=f'edit_test_{test_id}')
                 statistics_button = types.InlineKeyboardButton("Статистика", callback_data=f'statistics_{test_id}')
                 excel_button = types.InlineKeyboardButton("Статистика в Excel", callback_data=f'statisticsexcel_{test_id}')
+                back_button =  types.InlineKeyboardButton("<< Назад к тестам", callback_data=f'my_testsexcel')
+                start_test_button =  types.InlineKeyboardButton("Пройти тест >>", callback_data=f'goTest_{test_id}')
 
                 markup.add(edit_button, statistics_button, excel_button)
+                markup.add(back_button, start_test_button)
                 bot.send_message(message.chat.id, message_text, reply_markup=markup)
 
             else:
@@ -582,8 +659,10 @@ class TestBot:
             # Создаем DataFrame из списка данных
             df = pd.DataFrame(data)
 
+
+            test_title = db.get_test_title_by_id(test_id)
             # Сохраняем DataFrame в Excel файл
-            excel_filename = f"test_statistics_{test_id}.xlsx"  # Уникальное имя файла для каждого теста
+            excel_filename = f"test_statistics_{test_title}.xlsx"  # Уникальное имя файла для каждого теста
 
             with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False)
@@ -611,20 +690,161 @@ class TestBot:
             # Экспортируем статистику в Excel
             excel_file = export_test_statistics_to_excel(test_id)
 
+            markup = types.InlineKeyboardMarkup()
+            back_button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'test_{test_id}')
+            markup.add(back_button)
+
             # Отправляем файл пользователю
             with open(excel_file, 'rb') as file:
-                bot.send_document(message.chat.id, file)
+                bot.send_document(message.chat.id, file, reply_markup=markup)
 
 
-        @bot.message_handler(commands=['about_bot'])
+        def edit_menu(message, test_id):
+            test_info, question_count = db.get_test_info(test_id)  # Получаем информацию о тесте
+
+            if test_info:
+                title, time_per_question, description = test_info
+                message_text = (
+                    f"Название: {title}\n"
+                    f"Описание: {description}\n"
+                    f"Количество вопросов: {question_count}\n"
+                    f"Время на каждый вопрос: {time_per_question} секунд"
+                )
+
+                markup = types.InlineKeyboardMarkup()
+
+                # Создаем кнопки для редактирования
+                edit_title_button = types.InlineKeyboardButton("Изменить название", callback_data=f'editTitle_{test_id}')
+                edit_description_button = types.InlineKeyboardButton("Изменить описание", callback_data=f'editDescription_{test_id}')
+                edit_timer_button = types.InlineKeyboardButton("Изменить таймер", callback_data=f'editTimer_{test_id}')
+                edit_question_button = types.InlineKeyboardButton("Изменить вопросы", callback_data=f'editQuestion_{test_id}')
+                button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'test_{test_id}')
+
+
+                # Добавляем кнопки в разметку
+                markup.add(edit_title_button)
+                markup.add(edit_description_button)
+                markup.add(edit_timer_button)
+                markup.add(edit_question_button)
+                markup.add(button)
+
+                # Отправляем сообщение с кнопками
+                bot.send_message(message.chat.id, message_text, reply_markup=markup)
+            else:
+                bot.send_message(message.chat.id, "Не удалось получить информацию о тесте.")
+
+        def edit_title(message, test_id):
+            bot.send_message(message.chat.id, "Введите новое название теста:")
+            bot.register_next_step_handler(message, save_new_title, test_id)
+
+        def save_new_title(message, test_id):
+            markup = types.InlineKeyboardMarkup()
+            button = types.InlineKeyboardButton("<< Назад к меню изменений", callback_data=f'edit_test_{test_id}')
+            markup.add(button)
+
+            new_title = message.text
+            # Обновляем название теста в базе данных
+            db.update_test_title(test_id, new_title)
+
+            bot.send_message(message.chat.id, f"Название теста обновлено на: '{new_title}'", reply_markup=markup)
+
+
+        def edit_description(message, test_id):
+            bot.send_message(message.chat.id, "Введите новое описание теста:")
+            bot.register_next_step_handler(message, save_new_description, test_id)
+
+        def save_new_description(message, test_id):
+            markup = types.InlineKeyboardMarkup()
+            button = types.InlineKeyboardButton("<< Назад к меню изменений", callback_data=f'edit_test_{test_id}')
+            markup.add(button)
+
+            new_description = message.text
+
+            db.update_test_description(test_id, new_description)
+            bot.send_message(message.chat.id, f"Описание теста обновлено на: '{new_description}'", reply_markup=markup)
+
+        def edit_timer(message, test_id):
+            markup = types.InlineKeyboardMarkup()
+            ten_button = types.InlineKeyboardButton("10с", callback_data=f"time_10_{test_id}")
+            three_button = types.InlineKeyboardButton("30с", callback_data=f'time_30_{test_id}')
+            min_button = types.InlineKeyboardButton("1м", callback_data=f'time_60_{test_id}')
+            markup.row(ten_button, three_button, min_button)
+            bot.send_message(message.chat.id,
+                             'Сколько времени будет отводиться на один вопрос: 10 секунд, 30 или 1 минута?',
+                             reply_markup=markup)
+
+
+        def save_new_time(message, timer, test_id):
+            markup = types.InlineKeyboardMarkup()
+            button = types.InlineKeyboardButton("<< Назад к меню изменений", callback_data=f'edit_test_{test_id}')
+            markup.add(button)
+
+            db.update_test_time(test_id, timer)
+            bot.send_message(message.chat.id, f"Время на прохождение теста обновлено на: {timer} секунд.", reply_markup=markup)
+
+        def edit_question(message, test_id):
+            markup = types.InlineKeyboardMarkup()
+            add_ques = types.InlineKeyboardButton("Добавить вопрос", callback_data=f"addQuestion_{test_id}")
+            del_ques = types.InlineKeyboardButton("Удалить вопрос", callback_data=f"delQuestion_{test_id}")
+            button = types.InlineKeyboardButton("<< Назад к меню изменений", callback_data=f'edit_test_{test_id}')
+            markup.add(add_ques, del_ques)
+            markup.add(button)
+
+            info = db.get_test_info(test_id)
+            test_title = info[0][0]  # Имя теста
+            question_count = info[1]  # Количество вопросов
+
+            bot.send_message(message.chat.id, f'Тест: {test_title}\nвопросы: {question_count}',reply_markup=markup)
+
+        def choose_question_to_delete(message, test_id):
+            """Получает список вопросов для теста и отправляет их в виде кнопок."""
+            # Получаем список вопросов из базы данных
+            questions = db.get_questions_by_test_id(test_id)  # Предполагается, что у вас есть такая функция в db
+
+            if not questions:
+                bot.send_message(message.chat.id, "В этом тесте нет вопросов.")
+                return
+
+            markup = types.InlineKeyboardMarkup()
+
+            for question in questions:
+                question_id = question[0]  # Предполагается, что question_id - это первый элемент кортежа
+                question_text = question[2]  # Предполагается, что текст вопроса - это третий элемент
+                button = types.InlineKeyboardButton(question_text, callback_data=f'question_{question_id}_{test_id}')
+                markup.add(button)
+
+            back = types.InlineKeyboardButton("<< Назад к меню вопросов", callback_data=f'editQuestion_{test_id}')
+            markup.add(back)
+
+            bot.send_message(message.chat.id, "Выберите вопрос, который хотите удалить:", reply_markup=markup)
+
+        def delete_question(message, question_id, test_id):
+            markup = types.InlineKeyboardMarkup()
+            back = types.InlineKeyboardButton("<< Назад к списку вопросов", callback_data=f'delQuestion_{test_id}')
+            markup.add(back)
+
+            db.delete_question(question_id)
+            bot.send_message(message.chat.id, "Вопрос удалён.", reply_markup=markup)
+
+
+
+        @bot.message_handler(commands=['about'])
         def handle_about_bot(message):
-            bot.send_message(message.chat.id, "О боте... {в разработке}")
+            commands = [
+                ("/start", "старт"),
+                ("/create_test", "создать тест"),
+                ("/my_tests", "ваши тесты"),
+                ("/about", "о боте")
+            ]
 
+            command_text = ("Здесь ты можешь создавать свои собственные тесты."
+                            "\n\nТы можешь управлять ботом с помощью доступных команд:\n\n")
+            for command, description in commands:
+                command_text += f"{command} - {description}\n"
 
-
+            bot.send_message(message.chat.id, command_text.strip())   # Убираем лишний перевод строки в конце
 
 test_bot_instance = TestBot()
 test_bot_instance.start()
-
 
 bot.polling(none_stop=True)

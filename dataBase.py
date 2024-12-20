@@ -365,7 +365,7 @@ def get_test_info(test_id):
     conn = connect_db()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT title, time FROM tests WHERE test_id = ?", (test_id,))
+    cursor.execute("SELECT title, time, description, link FROM tests WHERE test_id = ?", (test_id,))
     test_info = cursor.fetchone()
 
     cursor.execute("SELECT COUNT(*) FROM questions WHERE test_id = ?", (test_id,))
@@ -425,3 +425,48 @@ def get_correct_answered_count(question_id):
     conn.close()
     return result[0] if result else 0
 
+
+def update_test_title(test_id, new_title):
+    """Обновляет название теста в базе данных по заданному test_id."""
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("UPDATE tests SET title = ? WHERE test_id = ?", (new_title, test_id))
+    conn.commit()
+    conn.close()
+
+def update_test_description(test_id, new_description):
+    """Обновляет описание теста в базе данных по заданному test_id."""
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("UPDATE tests SET description = ? WHERE test_id = ?", (new_description, test_id))
+    conn.commit()
+    conn.close()
+
+def update_test_time(test_id, timer):
+    """Обновляет время на прохождение теста в базе данных по заданному test_id."""
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute("UPDATE tests SET time = ? WHERE test_id = ?", (timer, test_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_question(question_id):
+    """Удаляет вопрос из базы данных по заданному question_id и обновляет статистику."""
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    # Удаляем связанные ответы
+    cursor.execute("DELETE FROM answers WHERE question_id = ?", (question_id,))
+
+    # Удаляем статистику вопроса
+    cursor.execute("DELETE FROM question_statistics WHERE question_id = ?", (question_id,))
+
+    # Удаляем сам вопрос
+    cursor.execute("DELETE FROM questions WHERE question_id = ?", (question_id,))
+
+    conn.commit()
+    conn.close()
