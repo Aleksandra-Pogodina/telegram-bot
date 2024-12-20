@@ -11,7 +11,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 import time
 
-TOKEN = '7952186657:AAFOWLSyUhqdrBFYE4TNajUfXPG3W4g-ETs'
+
 bot = telebot.TeleBot(TOKEN)
 db.create_tables()
 
