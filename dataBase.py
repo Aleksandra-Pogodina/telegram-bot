@@ -470,3 +470,47 @@ def delete_question(question_id):
 
     conn.commit()
     conn.close()
+
+def delete_test(test_id):
+    # Подключение к базе данных
+    conn = connect_db()
+    cur = conn.cursor()
+
+    try:
+        # Удаляем все ответы, связанные с вопросами теста
+        cur.execute('''
+            DELETE FROM answers
+            WHERE question_id IN (
+                SELECT question_id FROM questions WHERE test_id = ?
+            )
+        ''', (test_id,))
+
+        # Удаляем все вопросы, связанные с тестом
+        cur.execute('''
+            DELETE FROM questions
+            WHERE test_id = ?
+        ''', (test_id,))
+
+        # Удаляем статистику для теста
+        cur.execute('''
+            DELETE FROM test_statistics
+            WHERE test_id = ?
+        ''', (test_id,))
+
+        # Удаляем сам тест
+        cur.execute('''
+            DELETE FROM tests
+            WHERE test_id = ?
+        ''', (test_id,))
+
+        # Фиксируем изменения
+        conn.commit()
+
+    except Exception as e:
+        print(f"Произошла ошибка при удалении теста: {e}")
+
+    finally:
+        # Закрываем соединение с базой данных
+        conn.commit()
+        conn.close()
+

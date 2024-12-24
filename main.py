@@ -1,17 +1,16 @@
 import telebot
-from pyexpat.errors import messages
 from telebot import types
 import dataBase as db
 import matplotlib
+
 matplotlib.use('Agg')  # Используем бэкенд Agg
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
-import time
+import os
 
-
+TOKEN = '7952186657:AAFOWLSyUhqdrBFYE4TNajUfXPG3W4g-ETs'
 bot = telebot.TeleBot(TOKEN)
 db.create_tables()
 
@@ -34,8 +33,7 @@ class TestBot:
         self.correct = None
         self.question_data = None
         self.edit = None
-
-
+        self.description = None
 
     def start(self):
 
@@ -51,10 +49,11 @@ class TestBot:
                 btn1 = types.InlineKeyboardButton("Создать тест", callback_data='create_test')
                 btn2 = types.InlineKeyboardButton("Мои тесты", callback_data='my_tests')
                 btn3 = types.InlineKeyboardButton("О боте", callback_data='about_bot')
+                btn4 = types.InlineKeyboardButton("Загрузить тест в txt формате", callback_data="txt")
                 markup.row(btn1, btn2)
                 markup.row(btn3)
+                markup.row(btn4)
                 bot.send_message(message.chat.id, 'Добро пожаловать!', reply_markup=markup)
-
 
         @bot.callback_query_handler(func=lambda call: True)
         def on_click(call):
@@ -101,6 +100,9 @@ class TestBot:
             elif call.data.startswith('goTest_'):
                 test_id = int(call.data.split('_')[1])
                 start_test(call.message, test_id)
+            elif call.data.startswith("deleteTest_"):
+                test_id = int(call.data.split('_')[1])
+                delete_test(call.message, test_id)
             else:
                 if call.data == "create_test":
                     handle_test(call.message)
@@ -108,12 +110,14 @@ class TestBot:
                     handle_my_tests(call.message)
                 elif call.data == "about_bot":
                     handle_about_bot(call.message)
+                elif call.data == "txt":
+                    send_template(call.message)
                 elif call.data == 'skip_description':
                     skip_description(call.message)
                 elif call.data == "input_disc":
                     save_description(call.message)
                 elif call.data == "10":
-                    self.clock= 10
+                    self.clock = 10
                     save_time(call.message)
                 elif call.data == "30":
                     self.clock = 30
@@ -136,15 +140,294 @@ class TestBot:
                 elif call.data == 'take_test':
                     start_test(call.message, self.current_test_id)
 
+        @bot.message_handler(commands=['txt_test'])
+        def send_template(message):
+            template_content = """\
+        Название:
+        Описание:
+        Время: 10/30/60 (время на каждый вопрос в секундах)
 
+        Вопрос: ...
+        Тип: ввод/несколько/один (ввод своего ответа/несколько/один правильный ответ)
+        Варианты: (через запятую, правильный ответ/ответы пишите "в кавычках")
 
+        -----------------------------------------------------------------
+        Таким образом ваш тест может выглядеть так:
+
+        Название: Санкт-Петербург
+        Описание: Насколько хорошо Вы знаете об этом городе?
+        Время: 30
+
+        Вопрос: Прошлое название СПБ?
+        Тип: ввод
+        Варианты: "ленинград"
+
+        Вопрос: Какие водоёмы есть вблизи Питера?
+        Тип: несколько
+        Варианты: "ладожское озеро", байкал, "финский залив"
+
+        Вопрос: Какой год основания СПБ?
+        Тип: один
+        Варианты: "1703", 1677, 1509
+        """
+            # Сохраняем шаблон в файл
+            with open('test_template.txt', 'w', encoding='utf-8') as file:
+                file.write(template_content)
+
+            # Отправляем текстовое сообщение перед документом
+            bot.send_message(chat_id=message.chat.id,
+                             text="Вот шаблон для Вашего теста. \nОтправьте в таком же формате Ваш тест, в документе формата txt")
+
+            # Отправляем файл пользователю
+            with open('test_template.txt', 'rb') as file:
+                bot.send_document(chat_id=message.chat.id, document=file)
+
+        @bot.message_handler(content_types=['document'])
+        def handle_document(message):
+            db.add_user(message.chat.id)
+
+            # Проверяем, является ли загружаемый файл текстовым
+            if message.document.mime_type == 'text/plain':
+                file_info = bot.get_file(message.document.file_id)
+                downloaded_file = bot.download_file(file_info.file_path)
+
+                # Сохраняем загруженный файл
+                with open('uploaded_test.txt', 'wb') as new_file:
+                    new_file.write(downloaded_file)
+
+                # Обрабатываем файл
+                process_test_file(message, 'uploaded_test.txt')
+
+        '''def process_test_file(message, file_path):
+            with open(file_path, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+            # Считываем заголовок теста, описание и время
+            self.current_test_title = lines[0].strip()  # Заголовок теста
+            self.description = lines[1].strip()  # Описание теста
+            self.clock = int(lines[2].strip())  # Время на тест
+
+            # Сохраняем тест в базе данных
+            self.current_test_id = db.save_test(message.chat.id, self.current_test_title, self.description)
+            self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={self.current_test_id}"
+            db.save_link(self.link, self.current_test_id)
+            db.save_test_time(self.current_test_id, self.clock)
+
+            current_question = {}
+            question_started = False  # Флаг для отслеживания начала вопроса
+
+            for line in lines[3:]:  # Пропускаем первые 3 строки
+                line = line.strip()
+                if not line:
+                    continue  # Пропускаем пустые строки
+
+                # Обработка вопроса
+                if line.startswith("Вопрос:"):
+                    if current_question:  # Если текущий вопрос уже существует, сохраняем его
+                        save_question_to_db(current_question)
+
+                    current_question = {'question': line[len("Вопрос:"):].strip()}  # Получаем текст вопроса
+                    question_started = True
+                    continue
+
+                # Обработка типа вопроса
+                if line.startswith("Тип:"):
+                    current_question['type'] = line[len("Тип:"):].strip()  # Указываем тип вопроса
+                    continue
+
+                # Обработка вариантов ответов
+                if line.startswith("Варианты:"):
+                    options = line[len("Варианты:"):].strip().split(',')
+                    current_question['options'] = [option.strip() for option in options]
+
+                    # Определяем правильные ответы как все варианты, написанные капслоком
+                    current_question['correct'] = [option for option in current_question['options'] if option.isupper()]
+
+                    continue
+
+            # Сохраняем последний вопрос после завершения цикла (если есть)
+            if current_question:
+                save_question_to_db(current_question)
+
+            done_test(message)
+
+        def save_question_to_db(current_question):
+            current_question_id = db.save_question(self.current_test_id, current_question['question'],
+                                                   current_question['type'])
+
+            # Сохраняем варианты ответов, если они есть
+            if 'options' in current_question:
+                for option in current_question['options']:
+                    is_correct = option.strip() in current_question['correct']
+                    db.save_answer(current_question_id, option.strip(), is_correct=is_correct)'''
+
+        '''def process_test_file(message, file_path):
+            with open(file_path, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+            for line in lines[0:3]:
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Обработка заголовка теста
+                if line.startswith("Название:"):
+                    self.current_test_title = line[len("Название:"):].strip()  # Заголовок теста
+                    continue
+
+                # Обработка описания теста
+                if line.startswith("Описание:"):
+                    self.description = line[len("Описание:"):].strip()  # Описание теста
+                    continue
+
+                # Обработка времени теста
+                if line.startswith("Время:"):
+                    self.clock = int(line[len("Время:"):].strip())  # Время на тест
+                    continue
+
+            # Сохраняем тест в базе данных
+            self.current_test_id = db.save_test(message.chat.id, self.current_test_title, self.description)
+            self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={self.current_test_id}"
+            db.save_link(self.link, self.current_test_id)
+            db.save_test_time(self.current_test_id, self.clock)
+
+            # Инициализация переменных
+            current_question = {}
+
+            for line in lines[3:]:
+                line = line.strip()
+                if not line:
+                    continue  # Пропускаем пустые строки
+
+                # Обработка вопроса
+                if line.startswith("Вопрос:"):
+                    if current_question:  # Если текущий вопрос уже существует, сохраняем его
+                        save_question_to_db(current_question)
+
+                    current_question = {'question': line[len("Вопрос:"):].strip()}  # Получаем текст вопроса
+                    continue
+
+                # Обработка типа вопроса
+                if line.startswith("Тип:"):
+                    current_question['type'] = line[len("Тип:"):].strip()  # Указываем тип вопроса
+                    continue
+
+                # Обработка вариантов ответов
+                if line.startswith("Варианты:"):
+                    options = line[len("Варианты:"):].strip().split(',')
+                    current_question['options'] = [option.strip() for option in options]
+
+                    # Определяем правильные ответы как все варианты, написанные капслоком
+                    current_question['correct'] = [option for option in current_question['options'] if option.isupper()]
+
+                    continue
+
+            # Сохраняем последний вопрос после завершения цикла (если есть)
+            if current_question:
+                save_question_to_db(current_question)
+
+            done_test(message)
+
+        def save_question_to_db(current_question):
+            current_question_id = db.save_question(self.current_test_id, current_question['question'],
+                                                   current_question['type'])
+
+            # Сохраняем варианты ответов, если они есть
+            if 'options' in current_question:
+                for option in current_question['options']:
+                    is_correct = option.strip() in current_question['correct']
+                    db.save_answer(current_question_id, option.strip().lower(), is_correct=is_correct)'''
+
+        def process_test_file(message, file_path):
+            with open(file_path, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+
+            for line in lines[0:3]:
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Обработка заголовка теста
+                if line.startswith("Название:"):
+                    self.current_test_title = line[len("Название:"):].strip()  # Заголовок теста
+                    continue
+
+                # Обработка описания теста
+                if line.startswith("Описание:"):
+                    self.description = line[len("Описание:"):].strip()  # Описание теста
+                    continue
+
+                # Обработка времени теста
+                if line.startswith("Время:"):
+                    self.clock = int(line[len("Время:"):].strip())  # Время на тест
+                    continue
+
+            # Сохраняем тест в базе данных
+            self.current_test_id = db.save_test(message.chat.id, self.current_test_title, self.description)
+            self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={self.current_test_id}"
+            db.save_link(self.link, self.current_test_id)
+            db.save_test_time(self.current_test_id, self.clock)
+
+            # Инициализация переменных
+            current_question = {}
+
+            for line in lines[3:]:
+                line = line.strip()
+                if not line:
+                    continue  # Пропускаем пустые строки
+
+                # Обработка вопроса
+                if line.startswith("Вопрос:"):
+                    if current_question:  # Если текущий вопрос уже существует, сохраняем его
+                        save_question_to_db(current_question)
+
+                    current_question = {'question': line[len("Вопрос:"):].strip()}  # Получаем текст вопроса
+                    continue
+
+                # Обработка типа вопроса
+                if line.startswith("Тип:"):
+                    if line[len("Тип:"):].strip() == "ввод":
+                        current_question['type'] = "vvod"
+                    elif line[len("Тип:"):].strip() == "несколько":
+                        current_question['type'] = "several"
+                    elif line[len("Тип:"):].strip() == "один":
+                        current_question['type'] = "one"
+                    continue
+
+                # Обработка вариантов ответов
+                if line.startswith("Варианты:"):
+                    options = line[len("Варианты:"):].strip().split(',')
+                    current_question['options'] = [option.strip() for option in options]
+
+                    # Определяем правильные ответы как все варианты, заключенные в кавычки
+                    current_question['correct'] = [option.strip()[1:-1] for option in current_question['options'] if
+                                                   option.startswith('"') and option.endswith('"')]
+
+                    continue
+
+            # Сохраняем последний вопрос после завершения цикла (если есть)
+            if current_question:
+                save_question_to_db(current_question)
+
+            done_test(message)
+
+        def save_question_to_db(current_question):
+            current_question_id = db.save_question(self.current_test_id, current_question['question'],
+                                                   current_question['type'])
+
+            # Сохраняем варианты ответов, если они есть
+            if 'options' in current_question:
+                for option in current_question['options']:
+                    # Убираем кавычки при сохранении в БД
+                    option_to_save = option.strip().replace('"', '')
+                    is_correct = option_to_save in current_question['correct']
+                    db.save_answer(current_question_id, option_to_save.lower(), is_correct=is_correct)
 
         @bot.message_handler(commands=['create_test'])
         def handle_test(message):
             db.add_user(message.chat.id)
             bot.send_message(message.chat.id, "Введите название теста.")
             bot.register_next_step_handler(message, save_test_title)
-
 
         def save_test_title(message):
             self.current_test_title = message.text
@@ -153,8 +436,8 @@ class TestBot:
             skip_button = types.InlineKeyboardButton("Пропустить", callback_data='skip_description')
             input_button = types.InlineKeyboardButton("Ввести описание", callback_data='input_disc')
             markup.add(skip_button, input_button)
-            bot.send_message(message.chat.id, 'Вы можете добавить описание к тесту, а можете пропустить этот шаг', reply_markup=markup)
-
+            bot.send_message(message.chat.id, 'Вы можете добавить описание к тесту, а можете пропустить этот шаг',
+                             reply_markup=markup)
 
         def skip_description(message):
             user_id = message.chat.id
@@ -163,11 +446,9 @@ class TestBot:
             bot.send_message(message.chat.id, f"Тест '{self.current_test_title}' создан без описания.")
             save_link(message)
 
-
         def save_description(message):
             bot.send_message(message.chat.id, "Введите описание:")
-            bot.register_next_step_handler(message,save_description_in_db)
-
+            bot.register_next_step_handler(message, save_description_in_db)
 
         def save_description_in_db(message):
             description = message.text
@@ -191,12 +472,10 @@ class TestBot:
                              'Сколько времени будет отводиться на один вопрос: 10 секунд, 30 секунд или 1 минута?',
                              reply_markup=markup)
 
-
         def save_time(message):
             t_id = self.current_test_id
             db.save_test_time(t_id, self.clock)
             type_question(message)
-
 
         def type_question(message):
             markup = types.InlineKeyboardMarkup()
@@ -206,13 +485,13 @@ class TestBot:
             markup.add(one_button)
             markup.add(several_button)
             markup.add(vvod_button)
-            bot.send_message(message.chat.id, 'Вы можете создать вопрос с вариантами ответа, а можете сделать ввод ответа пользователем',
-            reply_markup=markup)
+            bot.send_message(message.chat.id,
+                             'Вы можете создать вопрос с вариантами ответа, а можете сделать ввод ответа пользователем',
+                             reply_markup=markup)
 
         def save_type_question(message, tip):
             self.current_type = tip
             save_question(message)
-
 
         def save_question(message):
             bot.send_message(message.chat.id, 'Введите вопрос.')
@@ -229,7 +508,6 @@ class TestBot:
             bot.send_message(message.chat.id, "Введите вариант ответа:")
             bot.register_next_step_handler(message, save_answer)
 
-
         def save_answer(message):
             if self.current_type == "vvod":
                 save_answer_in_db(message, message.text)
@@ -242,13 +520,11 @@ class TestBot:
 
                 bot.register_next_step_handler(message, lambda m: save_answer_in_db(m, answer_text))
 
-        def save_answer_in_db(message, answer_text = "да"):
+        def save_answer_in_db(message, answer_text="да"):
             if message.text.lower() == 'да' or self.current_type == "vvod":
                 is_correct = True
             else:
                 is_correct = False
-
-            db.save_answer(self.current_question_id, answer_text, is_correct)
 
             count = db.count_answers_by_question_id(self.current_question_id)
 
@@ -262,7 +538,8 @@ class TestBot:
                 if self.edit:
                     markup = types.InlineKeyboardMarkup()
                     button1 = types.InlineKeyboardButton("Добавить вариант ответа", callback_data='add_answer')
-                    button2 = types.InlineKeyboardButton("Закончить создание вопроса", callback_data=f'editQuestion_{self.current_test_id}')
+                    button2 = types.InlineKeyboardButton("Закончить создание вопроса",
+                                                         callback_data=f'editQuestion_{self.current_test_id}')
                     markup.row(button1)
                     markup.row(button2)
                     bot.send_message(message.chat.id,
@@ -277,12 +554,13 @@ class TestBot:
                     markup.row(button2)
                     markup.row(button3)
                     bot.send_message(message.chat.id,
-                    "Вариант ответа сохранен. Вы можете добавить еще один вариант ответа или создать ещё вопрос или закончить создание теста.",
-                    reply_markup=markup)
+                                     "Вариант ответа сохранен. Вы можете добавить еще один вариант ответа или создать ещё вопрос или закончить создание теста.",
+                                     reply_markup=markup)
             elif self.current_type == "vvod":
                 if self.edit:
                     markup = types.InlineKeyboardMarkup()
-                    button1 = types.InlineKeyboardButton("Закончить создание вопроса", callback_data=f'editQuestion_{self.current_test_id}')
+                    button1 = types.InlineKeyboardButton("Закончить создание вопроса",
+                                                         callback_data=f'editQuestion_{self.current_test_id}')
                     markup.row(button1)
                     bot.send_message(message.chat.id,
                                      "Вариант ответа сохранен. Вы можете закончить создание вопроса.",
@@ -296,7 +574,6 @@ class TestBot:
                     bot.send_message(message.chat.id,
                                      "Вариант ответа сохранен. Вы можете создать ещё вопрос или закончить создание теста.",
                                      reply_markup=markup)
-
 
         def done_test(message):
             markup = types.InlineKeyboardMarkup()
@@ -328,13 +605,12 @@ class TestBot:
             if db.test_exists(test_id):
                 test_time = db.get_test_time(test_id)
                 test_title = db.get_test_title_by_id(test_id)
-                bot.send_message(message.chat.id, f"Вы начали тест '{test_title}'\n\nВремени на вопрос: {test_time} секунд")
+                bot.send_message(message.chat.id, f"Вы начали тест {test_title}")
                 db.increment_started_count(test_id)
                 self.questions = db.get_questions_by_test_id(test_id)
                 send_question(message, test_id)
             else:
                 bot.send_message(message.chat.id, "Такого теста не существует")
-
 
         def send_question(message, test_id):
             length = len(self.questions)
@@ -376,7 +652,6 @@ class TestBot:
                     bot.send_message(message.chat.id, question_text)
                     bot.register_next_step_handler_by_chat_id(message.chat.id, handle_text_answer, test_id)
 
-
                 @bot.poll_answer_handler()
                 def handle_poll_answer(poll_answer):
                     if self.question_type == "several":
@@ -395,8 +670,6 @@ class TestBot:
                             bot.send_message(message.chat.id,
                                              f"Неверно. Правильные ответы: {', '.join(self.correct)}")
 
-
-
                         send_question(message, test_id)
 
                     elif self.question_type == "one":
@@ -405,6 +678,8 @@ class TestBot:
                             self.correct_answers_from_user += 1
                         else:
                             db.update_question_statistics(self.question_data[0], test_id, False)
+                            bot.send_message(message.chat.id,
+                                             f"Неверно. Правильный ответ: {self.correct}")
 
                         send_question(message, test_id)
 
@@ -412,27 +687,24 @@ class TestBot:
                 db.increment_completed_count(test_id)
                 statistic_for_user(message, length, test_id)
 
-
-
         def handle_text_answer(message, test_id):
             self.correct = db.get_correct_answer_by_question_id(self.question_data[0])
-            if message.text.lower() == self.correct:
+            if message.text.lower() == self.correct.lower():
                 db.update_question_statistics(self.question_data[0], test_id, True)
                 bot.send_message(message.chat.id, "Правильный ответ")
                 self.correct_answers_from_user += 1
             else:
                 db.update_question_statistics(self.question_data[0], test_id, False)
-                bot.send_message(message.chat.id, f"Неверно. Правильный ответ: {self.correct}")
+                bot.send_message(message.chat.id, f"Неверно. Правильный ответ: {self.correct.lower()}")
 
             self.current_question_index += 1
             send_question(message, test_id)
 
-
         def statistic_for_user(message, total, test_id):
             percent = round((self.correct_answers_from_user / total) * 100, 2)
-            bot.send_message(message.chat.id, f"Вы ответили верно на {self.correct_answers_from_user} из {total} вопросов.\n"
-                                              f"Таким образом, Вы ответили верно на {percent}% вопросов.")
-
+            bot.send_message(message.chat.id,
+                             f"Вы ответили верно на {self.correct_answers_from_user} из {total} вопросов.\n"
+                             f"Таким образом, Вы ответили верно на {percent}% вопросов.")
 
         def create_histogram(statistics, test_title):
             """Создает гистограмму успешности вопросов."""
@@ -485,8 +757,6 @@ class TestBot:
                 bot.send_photo(message.chat.id, chart_file)
 
             show_test_statistics(message, test_id)
-
-
 
         def create_test_statistics_pie_chart(started_count, completed_count, test_title):
             """Создает круговую диаграмму статистики по тесту."""
@@ -604,12 +874,15 @@ class TestBot:
                 markup = types.InlineKeyboardMarkup()
                 edit_button = types.InlineKeyboardButton("Редактировать", callback_data=f'edit_test_{test_id}')
                 statistics_button = types.InlineKeyboardButton("Статистика", callback_data=f'statistics_{test_id}')
-                excel_button = types.InlineKeyboardButton("Статистика в Excel", callback_data=f'statisticsexcel_{test_id}')
-                back_button =  types.InlineKeyboardButton("<< Назад к тестам", callback_data=f'my_testsexcel')
-                start_test_button =  types.InlineKeyboardButton("Пройти тест >>", callback_data=f'goTest_{test_id}')
+                excel_button = types.InlineKeyboardButton("Статистика в Excel",
+                                                          callback_data=f'statisticsexcel_{test_id}')
+                back_button = types.InlineKeyboardButton("<< Назад к тестам", callback_data=f'my_testsexcel')
+                start_test_button = types.InlineKeyboardButton("Пройти тест >>", callback_data=f'goTest_{test_id}')
+                delete_button = types.InlineKeyboardButton("Удалить тест", callback_data=f"deleteTest_{test_id}")
 
                 markup.add(edit_button, statistics_button, excel_button)
                 markup.add(back_button, start_test_button)
+                markup.add(delete_button)
                 bot.send_message(message.chat.id, message_text, reply_markup=markup)
 
             else:
@@ -659,7 +932,6 @@ class TestBot:
             # Создаем DataFrame из списка данных
             df = pd.DataFrame(data)
 
-
             test_title = db.get_test_title_by_id(test_id)
             # Сохраняем DataFrame в Excel файл
             excel_filename = f"test_statistics_{test_title}.xlsx"  # Уникальное имя файла для каждого теста
@@ -691,35 +963,37 @@ class TestBot:
             excel_file = export_test_statistics_to_excel(test_id)
 
             markup = types.InlineKeyboardMarkup()
-            back_button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'test_{test_id}')
+            back_button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'de')
             markup.add(back_button)
 
             # Отправляем файл пользователю
             with open(excel_file, 'rb') as file:
                 bot.send_document(message.chat.id, file, reply_markup=markup)
 
-
         def edit_menu(message, test_id):
             test_info, question_count = db.get_test_info(test_id)  # Получаем информацию о тесте
 
             if test_info:
-                title, time_per_question, description = test_info
+                title, time_per_question, description, link = test_info
                 message_text = (
                     f"Название: {title}\n"
                     f"Описание: {description}\n"
                     f"Количество вопросов: {question_count}\n"
                     f"Время на каждый вопрос: {time_per_question} секунд"
+                    f"Ссылка: {link}"
                 )
 
                 markup = types.InlineKeyboardMarkup()
 
                 # Создаем кнопки для редактирования
-                edit_title_button = types.InlineKeyboardButton("Изменить название", callback_data=f'editTitle_{test_id}')
-                edit_description_button = types.InlineKeyboardButton("Изменить описание", callback_data=f'editDescription_{test_id}')
+                edit_title_button = types.InlineKeyboardButton("Изменить название",
+                                                               callback_data=f'editTitle_{test_id}')
+                edit_description_button = types.InlineKeyboardButton("Изменить описание",
+                                                                     callback_data=f'editDescription_{test_id}')
                 edit_timer_button = types.InlineKeyboardButton("Изменить таймер", callback_data=f'editTimer_{test_id}')
-                edit_question_button = types.InlineKeyboardButton("Изменить вопросы", callback_data=f'editQuestion_{test_id}')
+                edit_question_button = types.InlineKeyboardButton("Изменить вопросы",
+                                                                  callback_data=f'editQuestion_{test_id}')
                 button = types.InlineKeyboardButton("<< Назад к меню теста", callback_data=f'test_{test_id}')
-
 
                 # Добавляем кнопки в разметку
                 markup.add(edit_title_button)
@@ -748,7 +1022,6 @@ class TestBot:
 
             bot.send_message(message.chat.id, f"Название теста обновлено на: '{new_title}'", reply_markup=markup)
 
-
         def edit_description(message, test_id):
             bot.send_message(message.chat.id, "Введите новое описание теста:")
             bot.register_next_step_handler(message, save_new_description, test_id)
@@ -773,14 +1046,14 @@ class TestBot:
                              'Сколько времени будет отводиться на один вопрос: 10 секунд, 30 или 1 минута?',
                              reply_markup=markup)
 
-
         def save_new_time(message, timer, test_id):
             markup = types.InlineKeyboardMarkup()
             button = types.InlineKeyboardButton("<< Назад к меню изменений", callback_data=f'edit_test_{test_id}')
             markup.add(button)
 
             db.update_test_time(test_id, timer)
-            bot.send_message(message.chat.id, f"Время на прохождение теста обновлено на: {timer} секунд.", reply_markup=markup)
+            bot.send_message(message.chat.id, f"Время на прохождение теста обновлено на: {timer} секунд.",
+                             reply_markup=markup)
 
         def edit_question(message, test_id):
             markup = types.InlineKeyboardMarkup()
@@ -794,7 +1067,7 @@ class TestBot:
             test_title = info[0][0]  # Имя теста
             question_count = info[1]  # Количество вопросов
 
-            bot.send_message(message.chat.id, f'Тест: {test_title}\nвопросы: {question_count}',reply_markup=markup)
+            bot.send_message(message.chat.id, f'Тест: {test_title}\nвопросы: {question_count}', reply_markup=markup)
 
         def choose_question_to_delete(message, test_id):
             """Получает список вопросов для теста и отправляет их в виде кнопок."""
@@ -826,7 +1099,13 @@ class TestBot:
             db.delete_question(question_id)
             bot.send_message(message.chat.id, "Вопрос удалён.", reply_markup=markup)
 
+        def delete_test(message, test_id):
+            markup = types.InlineKeyboardMarkup()
+            back = types.InlineKeyboardButton("<< Назад к тестам", callback_data=f'my_tests')
+            markup.add(back)
 
+            db.delete_test(test_id)
+            bot.send_message(message.chat.id, "Тест удалён.", reply_markup=markup)
 
         @bot.message_handler(commands=['about'])
         def handle_about_bot(message):
@@ -842,7 +1121,8 @@ class TestBot:
             for command, description in commands:
                 command_text += f"{command} - {description}\n"
 
-            bot.send_message(message.chat.id, command_text.strip())   # Убираем лишний перевод строки в конце
+            bot.send_message(message.chat.id, command_text.strip())  # Убираем лишний перевод строки в конце
+
 
 test_bot_instance = TestBot()
 test_bot_instance.start()
