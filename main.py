@@ -2,13 +2,16 @@ import telebot
 from telebot import types
 import dataBase as db
 import matplotlib
-
 matplotlib.use('Agg')  # Используем бэкенд Agg
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from openpyxl.utils import get_column_letter
-import os
+import DB_update
+import DB_statistic
+import DB_get
+import DB_save
+import DB_delete
 
 TOKEN = '7952186657:AAFOWLSyUhqdrBFYE4TNajUfXPG3W4g-ETs'
 bot = telebot.TeleBot(TOKEN)
@@ -184,7 +187,7 @@ class TestBot:
 
         @bot.message_handler(content_types=['document'])
         def handle_document(message):
-            db.add_user(message.chat.id)
+            DB_save.add_user(message.chat.id)
 
             # Проверяем, является ли загружаемый файл текстовым
             if message.document.mime_type == 'text/plain':
@@ -198,145 +201,6 @@ class TestBot:
                 # Обрабатываем файл
                 process_test_file(message, 'uploaded_test.txt')
 
-        '''def process_test_file(message, file_path):
-            with open(file_path, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-
-            # Считываем заголовок теста, описание и время
-            self.current_test_title = lines[0].strip()  # Заголовок теста
-            self.description = lines[1].strip()  # Описание теста
-            self.clock = int(lines[2].strip())  # Время на тест
-
-            # Сохраняем тест в базе данных
-            self.current_test_id = db.save_test(message.chat.id, self.current_test_title, self.description)
-            self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={self.current_test_id}"
-            db.save_link(self.link, self.current_test_id)
-            db.save_test_time(self.current_test_id, self.clock)
-
-            current_question = {}
-            question_started = False  # Флаг для отслеживания начала вопроса
-
-            for line in lines[3:]:  # Пропускаем первые 3 строки
-                line = line.strip()
-                if not line:
-                    continue  # Пропускаем пустые строки
-
-                # Обработка вопроса
-                if line.startswith("Вопрос:"):
-                    if current_question:  # Если текущий вопрос уже существует, сохраняем его
-                        save_question_to_db(current_question)
-
-                    current_question = {'question': line[len("Вопрос:"):].strip()}  # Получаем текст вопроса
-                    question_started = True
-                    continue
-
-                # Обработка типа вопроса
-                if line.startswith("Тип:"):
-                    current_question['type'] = line[len("Тип:"):].strip()  # Указываем тип вопроса
-                    continue
-
-                # Обработка вариантов ответов
-                if line.startswith("Варианты:"):
-                    options = line[len("Варианты:"):].strip().split(',')
-                    current_question['options'] = [option.strip() for option in options]
-
-                    # Определяем правильные ответы как все варианты, написанные капслоком
-                    current_question['correct'] = [option for option in current_question['options'] if option.isupper()]
-
-                    continue
-
-            # Сохраняем последний вопрос после завершения цикла (если есть)
-            if current_question:
-                save_question_to_db(current_question)
-
-            done_test(message)
-
-        def save_question_to_db(current_question):
-            current_question_id = db.save_question(self.current_test_id, current_question['question'],
-                                                   current_question['type'])
-
-            # Сохраняем варианты ответов, если они есть
-            if 'options' in current_question:
-                for option in current_question['options']:
-                    is_correct = option.strip() in current_question['correct']
-                    db.save_answer(current_question_id, option.strip(), is_correct=is_correct)'''
-
-        '''def process_test_file(message, file_path):
-            with open(file_path, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-
-            for line in lines[0:3]:
-                line = line.strip()
-                if not line:
-                    continue
-
-                # Обработка заголовка теста
-                if line.startswith("Название:"):
-                    self.current_test_title = line[len("Название:"):].strip()  # Заголовок теста
-                    continue
-
-                # Обработка описания теста
-                if line.startswith("Описание:"):
-                    self.description = line[len("Описание:"):].strip()  # Описание теста
-                    continue
-
-                # Обработка времени теста
-                if line.startswith("Время:"):
-                    self.clock = int(line[len("Время:"):].strip())  # Время на тест
-                    continue
-
-            # Сохраняем тест в базе данных
-            self.current_test_id = db.save_test(message.chat.id, self.current_test_title, self.description)
-            self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={self.current_test_id}"
-            db.save_link(self.link, self.current_test_id)
-            db.save_test_time(self.current_test_id, self.clock)
-
-            # Инициализация переменных
-            current_question = {}
-
-            for line in lines[3:]:
-                line = line.strip()
-                if not line:
-                    continue  # Пропускаем пустые строки
-
-                # Обработка вопроса
-                if line.startswith("Вопрос:"):
-                    if current_question:  # Если текущий вопрос уже существует, сохраняем его
-                        save_question_to_db(current_question)
-
-                    current_question = {'question': line[len("Вопрос:"):].strip()}  # Получаем текст вопроса
-                    continue
-
-                # Обработка типа вопроса
-                if line.startswith("Тип:"):
-                    current_question['type'] = line[len("Тип:"):].strip()  # Указываем тип вопроса
-                    continue
-
-                # Обработка вариантов ответов
-                if line.startswith("Варианты:"):
-                    options = line[len("Варианты:"):].strip().split(',')
-                    current_question['options'] = [option.strip() for option in options]
-
-                    # Определяем правильные ответы как все варианты, написанные капслоком
-                    current_question['correct'] = [option for option in current_question['options'] if option.isupper()]
-
-                    continue
-
-            # Сохраняем последний вопрос после завершения цикла (если есть)
-            if current_question:
-                save_question_to_db(current_question)
-
-            done_test(message)
-
-        def save_question_to_db(current_question):
-            current_question_id = db.save_question(self.current_test_id, current_question['question'],
-                                                   current_question['type'])
-
-            # Сохраняем варианты ответов, если они есть
-            if 'options' in current_question:
-                for option in current_question['options']:
-                    is_correct = option.strip() in current_question['correct']
-                    db.save_answer(current_question_id, option.strip().lower(), is_correct=is_correct)'''
 
         def process_test_file(message, file_path):
             with open(file_path, 'r', encoding='utf-8') as file:
@@ -363,10 +227,10 @@ class TestBot:
                     continue
 
             # Сохраняем тест в базе данных
-            self.current_test_id = db.save_test(message.chat.id, self.current_test_title, self.description)
+            self.current_test_id = DB_save.save_test(message.chat.id, self.current_test_title, self.description)
             self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={self.current_test_id}"
-            db.save_link(self.link, self.current_test_id)
-            db.save_test_time(self.current_test_id, self.clock)
+            DB_save.save_link(self.link, self.current_test_id)
+            DB_save.save_test_time(self.current_test_id, self.clock)
 
             # Инициализация переменных
             current_question = {}
@@ -412,7 +276,7 @@ class TestBot:
             done_test(message)
 
         def save_question_to_db(current_question):
-            current_question_id = db.save_question(self.current_test_id, current_question['question'],
+            current_question_id = DB_save.save_question(self.current_test_id, current_question['question'],
                                                    current_question['type'])
 
             # Сохраняем варианты ответов, если они есть
@@ -421,11 +285,11 @@ class TestBot:
                     # Убираем кавычки при сохранении в БД
                     option_to_save = option.strip().replace('"', '')
                     is_correct = option_to_save in current_question['correct']
-                    db.save_answer(current_question_id, option_to_save.lower(), is_correct=is_correct)
+                    DB_save.save_answer(current_question_id, option_to_save.lower(), is_correct=is_correct)
 
         @bot.message_handler(commands=['create_test'])
         def handle_test(message):
-            db.add_user(message.chat.id)
+            DB_save.add_user(message.chat.id)
             bot.send_message(message.chat.id, "Введите название теста.")
             bot.register_next_step_handler(message, save_test_title)
 
@@ -441,7 +305,7 @@ class TestBot:
 
         def skip_description(message):
             user_id = message.chat.id
-            self.current_test_id = db.save_test(user_id, self.current_test_title, None)
+            self.current_test_id = DB_save.save_test(user_id, self.current_test_title, None)
 
             bot.send_message(message.chat.id, f"Тест '{self.current_test_title}' создан без описания.")
             save_link(message)
@@ -452,14 +316,14 @@ class TestBot:
 
         def save_description_in_db(message):
             description = message.text
-            self.current_test_id = db.save_test(message.from_user.id, self.current_test_title, description)
+            self.current_test_id = DB_save.save_test(message.from_user.id, self.current_test_title, description)
             bot.send_message(message.chat.id, f"Тест '{self.current_test_title}' с описанием '{description}' создан!")
             save_link(message)
 
         def save_link(message):
             t_id = self.current_test_id
             self.link = f"https://t.me/TheCreatorOfTheTestsBot?start={t_id}"
-            db.save_link(self.link, self.current_test_id)
+            DB_save.save_link(self.link, self.current_test_id)
             clock(message)
 
         def clock(message):
@@ -474,7 +338,7 @@ class TestBot:
 
         def save_time(message):
             t_id = self.current_test_id
-            db.save_test_time(t_id, self.clock)
+            DB_save.save_test_time(t_id, self.clock)
             type_question(message)
 
         def type_question(message):
@@ -499,7 +363,7 @@ class TestBot:
 
         def save_question_in_db(message):
             self.current_question = message.text
-            self.current_question_id = db.save_question(self.current_test_id, self.current_question, self.current_type)
+            self.current_question_id = DB_save.save_question(self.current_test_id, self.current_question, self.current_type)
 
             bot.send_message(message.chat.id, "Вопрос сохранен.")
             make_answer(message)
@@ -526,7 +390,8 @@ class TestBot:
             else:
                 is_correct = False
 
-            count = db.count_answers_by_question_id(self.current_question_id)
+            DB_save.save_answer(self.current_question_id, answer_text, is_correct)
+            count = DB_get.count_answers_by_question_id(self.current_question_id)
 
             if self.current_type != "vvod" and count < 2:
                 markup = types.InlineKeyboardMarkup()
@@ -601,13 +466,13 @@ class TestBot:
             self.correct_answers_from_user = 0
             self.correct = None
             self.question_data = None
-            self.clock = db.get_test_time(test_id)
-            if db.test_exists(test_id):
-                test_time = db.get_test_time(test_id)
-                test_title = db.get_test_title_by_id(test_id)
+            self.clock = DB_get.get_test_time(test_id)
+            if DB_get.test_exists(test_id):
+                test_time = DB_get.get_test_time(test_id)
+                test_title = DB_get.get_test_title_by_id(test_id)
                 bot.send_message(message.chat.id, f"Вы начали тест {test_title}")
-                db.increment_started_count(test_id)
-                self.questions = db.get_questions_by_test_id(test_id)
+                DB_statistic.increment_started_count(test_id)
+                self.questions = DB_get.get_questions_by_test_id(test_id)
                 send_question(message, test_id)
             else:
                 bot.send_message(message.chat.id, "Такого теста не существует")
@@ -622,10 +487,10 @@ class TestBot:
                 self.question_type = self.question_data[3]
 
                 if self.question_type == "one":
-                    options = db.get_answers_by_question_id(self.question_data[0])
+                    options = DB_get.get_answers_by_question_id(self.question_data[0])
                     self.option_texts = [option[2] for option in options]
 
-                    self.correct = db.get_correct_answer_by_question_id(self.question_data[0])
+                    self.correct = DB_get.get_correct_answer_by_question_id(self.question_data[0])
 
                     if self.correct in self.option_texts:
                         correct_id = self.option_texts.index(self.correct)
@@ -637,10 +502,10 @@ class TestBot:
 
 
                 elif self.question_type == "several":
-                    options = db.get_answers_by_question_id(self.question_data[0])
+                    options = DB_get.get_answers_by_question_id(self.question_data[0])
                     self.option_texts = [option[2] for option in options]
 
-                    self.correct = db.get_correct_answers_by_question_id(self.question_data[0])
+                    self.correct = DB_get.get_correct_answers_by_question_id(self.question_data[0])
 
                     self.current_question_index += 1
 
@@ -662,11 +527,11 @@ class TestBot:
                         correct_answers_set = set(correct_indices)
 
                         if user_answers_set == correct_answers_set:
-                            db.update_question_statistics(self.question_data[0], test_id, True)
+                            DB_statistic.update_question_statistics(self.question_data[0], test_id, True)
                             self.correct_answers_from_user += 1
                             bot.send_message(message.chat.id, "Все ответы правильные!")
                         else:
-                            db.update_question_statistics(self.question_data[0], test_id, False)
+                            DB_statistic.update_question_statistics(self.question_data[0], test_id, False)
                             bot.send_message(message.chat.id,
                                              f"Неверно. Правильные ответы: {', '.join(self.correct)}")
 
@@ -674,27 +539,27 @@ class TestBot:
 
                     elif self.question_type == "one":
                         if self.option_texts[poll_answer.option_ids[0]] == self.correct:
-                            db.update_question_statistics(self.question_data[0], test_id, True)
+                            DB_statistic.update_question_statistics(self.question_data[0], test_id, True)
                             self.correct_answers_from_user += 1
                         else:
-                            db.update_question_statistics(self.question_data[0], test_id, False)
+                            DB_statistic.update_question_statistics(self.question_data[0], test_id, False)
                             bot.send_message(message.chat.id,
                                              f"Неверно. Правильный ответ: {self.correct}")
 
                         send_question(message, test_id)
 
             else:
-                db.increment_completed_count(test_id)
+                DB_statistic.increment_completed_count(test_id)
                 statistic_for_user(message, length, test_id)
 
         def handle_text_answer(message, test_id):
-            self.correct = db.get_correct_answer_by_question_id(self.question_data[0])
+            self.correct = DB_get.get_correct_answer_by_question_id(self.question_data[0])
             if message.text.lower() == self.correct.lower():
-                db.update_question_statistics(self.question_data[0], test_id, True)
+                DB_statistic.update_question_statistics(self.question_data[0], test_id, True)
                 bot.send_message(message.chat.id, "Правильный ответ")
                 self.correct_answers_from_user += 1
             else:
-                db.update_question_statistics(self.question_data[0], test_id, False)
+                DB_statistic.update_question_statistics(self.question_data[0], test_id, False)
                 bot.send_message(message.chat.id, f"Неверно. Правильный ответ: {self.correct.lower()}")
 
             self.current_question_index += 1
@@ -738,7 +603,7 @@ class TestBot:
             return chart_filename
 
         def view_statistics(message, test_id):
-            statistics = db.get_test_statistics(test_id)
+            statistics = DB_statistic.get_test_statistics(test_id)
 
             if not statistics:
                 markup = types.InlineKeyboardMarkup()
@@ -747,7 +612,7 @@ class TestBot:
                 bot.send_message(message.chat.id, "Нет доступной статистики для этого теста.", reply_markup=markup)
                 return
 
-            test_title = db.get_test_title_by_id(test_id)
+            test_title = DB_get.get_test_title_by_id(test_id)
 
             # Создаем круговую диаграмму
             chart_filename = create_histogram(statistics, test_title)
@@ -809,11 +674,11 @@ class TestBot:
             return chart_filename
 
         def show_test_statistics(message, test_id):
-            statistics = db.get_test_statistics_pie(test_id)  # Получаем статистику
+            statistics = DB_statistic.get_test_statistics_pie(test_id)  # Получаем статистику
             if statistics:
                 started_count = statistics['started']
                 completed_count = statistics['completed']
-                test_title = db.get_test_title_by_id(test_id)  # Получаем название теста
+                test_title = DB_get.get_test_title_by_id(test_id)  # Получаем название теста
 
                 # Создаем круговую диаграмму
                 chart_filename = create_test_statistics_pie_chart(started_count, completed_count, test_title)
@@ -838,7 +703,7 @@ class TestBot:
         @bot.message_handler(commands=['my_tests'])
         def handle_my_tests(message):
             user_id = message.chat.id  # Получаем ID пользователя
-            tests = db.get_user_tests(user_id)  # Получаем список тестов
+            tests = DB_get.get_user_tests(user_id)  # Получаем список тестов
 
             if tests:
                 markup = types.InlineKeyboardMarkup()
@@ -858,7 +723,7 @@ class TestBot:
                 bot.send_message(message.chat.id, "У вас нет созданных тестов.", reply_markup=markup)
 
         def about_test(message, test_id):
-            test_info, question_count = db.get_test_info(test_id)  # Получаем информацию о тесте
+            test_info, question_count = DB_get.get_test_info(test_id)  # Получаем информацию о тесте
 
             if test_info:
                 title, time_per_question, description, link = test_info
@@ -876,7 +741,7 @@ class TestBot:
                 statistics_button = types.InlineKeyboardButton("Статистика", callback_data=f'statistics_{test_id}')
                 excel_button = types.InlineKeyboardButton("Статистика в Excel",
                                                           callback_data=f'statisticsexcel_{test_id}')
-                back_button = types.InlineKeyboardButton("<< Назад к тестам", callback_data=f'my_testsexcel')
+                back_button = types.InlineKeyboardButton("<< Назад к тестам", callback_data=f'my_tests')
                 start_test_button = types.InlineKeyboardButton("Пройти тест >>", callback_data=f'goTest_{test_id}')
                 delete_button = types.InlineKeyboardButton("Удалить тест", callback_data=f"deleteTest_{test_id}")
 
@@ -894,14 +759,14 @@ class TestBot:
             data = []
 
             # Получаем название теста
-            title = db.get_test_title_by_id(test_id)
+            title = DB_get.get_test_title_by_id(test_id)
 
             # Получаем статистику по тесту
-            started_count = db.get_started_count(test_id)  # Количество начавших тест
-            completed_count = db.get_completed_count(test_id)  # Количество завершивших тест
+            started_count = DB_get.get_started_count(test_id)  # Количество начавших тест
+            completed_count = DB_get.get_completed_count(test_id)  # Количество завершивших тест
 
             # Получаем вопросы и их статистику
-            questions = db.get_questions_by_test_id(test_id)  # Получаем вопросы по ID теста
+            questions = DB_get.get_questions_by_test_id(test_id)  # Получаем вопросы по ID теста
 
             # Добавляем информацию о тесте в первую строку
             data.append({
@@ -916,8 +781,8 @@ class TestBot:
             for question in questions:
                 question_id = question[0]  # Используем числовой индекс для доступа к question_id
                 question_text = question[2]  # Используем числовой индекс для доступа к тексту вопроса
-                answered_count = db.get_answered_count(question_id)  # Количество ответивших на вопрос
-                correct_count = db.get_correct_answered_count(question_id)  # Количество ответивших верно
+                answered_count = DB_get.get_answered_count(question_id)  # Количество ответивших на вопрос
+                correct_count = DB_get.get_correct_answered_count(question_id)  # Количество ответивших верно
 
                 # Добавляем данные о вопросе в список
                 data.append({
@@ -932,7 +797,7 @@ class TestBot:
             # Создаем DataFrame из списка данных
             df = pd.DataFrame(data)
 
-            test_title = db.get_test_title_by_id(test_id)
+            test_title = DB_get.get_test_title_by_id(test_id)
             # Сохраняем DataFrame в Excel файл
             excel_filename = f"test_statistics_{test_title}.xlsx"  # Уникальное имя файла для каждого теста
 
@@ -971,7 +836,7 @@ class TestBot:
                 bot.send_document(message.chat.id, file, reply_markup=markup)
 
         def edit_menu(message, test_id):
-            test_info, question_count = db.get_test_info(test_id)  # Получаем информацию о тесте
+            test_info, question_count = DB_get.get_test_info(test_id)  # Получаем информацию о тесте
 
             if test_info:
                 title, time_per_question, description, link = test_info
@@ -979,7 +844,7 @@ class TestBot:
                     f"Название: {title}\n"
                     f"Описание: {description}\n"
                     f"Количество вопросов: {question_count}\n"
-                    f"Время на каждый вопрос: {time_per_question} секунд"
+                    f"Время на каждый вопрос: {time_per_question} секунд\n"
                     f"Ссылка: {link}"
                 )
 
@@ -1018,7 +883,7 @@ class TestBot:
 
             new_title = message.text
             # Обновляем название теста в базе данных
-            db.update_test_title(test_id, new_title)
+            DB_update.update_test_title(test_id, new_title)
 
             bot.send_message(message.chat.id, f"Название теста обновлено на: '{new_title}'", reply_markup=markup)
 
@@ -1033,7 +898,7 @@ class TestBot:
 
             new_description = message.text
 
-            db.update_test_description(test_id, new_description)
+            DB_update.update_test_description(test_id, new_description)
             bot.send_message(message.chat.id, f"Описание теста обновлено на: '{new_description}'", reply_markup=markup)
 
         def edit_timer(message, test_id):
@@ -1051,7 +916,7 @@ class TestBot:
             button = types.InlineKeyboardButton("<< Назад к меню изменений", callback_data=f'edit_test_{test_id}')
             markup.add(button)
 
-            db.update_test_time(test_id, timer)
+            DB_update.update_test_time(test_id, timer)
             bot.send_message(message.chat.id, f"Время на прохождение теста обновлено на: {timer} секунд.",
                              reply_markup=markup)
 
@@ -1063,7 +928,7 @@ class TestBot:
             markup.add(add_ques, del_ques)
             markup.add(button)
 
-            info = db.get_test_info(test_id)
+            info = DB_get.get_test_info(test_id)
             test_title = info[0][0]  # Имя теста
             question_count = info[1]  # Количество вопросов
 
@@ -1072,7 +937,7 @@ class TestBot:
         def choose_question_to_delete(message, test_id):
             """Получает список вопросов для теста и отправляет их в виде кнопок."""
             # Получаем список вопросов из базы данных
-            questions = db.get_questions_by_test_id(test_id)  # Предполагается, что у вас есть такая функция в db
+            questions = DB_get.get_questions_by_test_id(test_id)  # Предполагается, что у вас есть такая функция в db
 
             if not questions:
                 bot.send_message(message.chat.id, "В этом тесте нет вопросов.")
@@ -1096,7 +961,7 @@ class TestBot:
             back = types.InlineKeyboardButton("<< Назад к списку вопросов", callback_data=f'delQuestion_{test_id}')
             markup.add(back)
 
-            db.delete_question(question_id)
+            DB_delete.delete_question(question_id)
             bot.send_message(message.chat.id, "Вопрос удалён.", reply_markup=markup)
 
         def delete_test(message, test_id):
@@ -1104,7 +969,7 @@ class TestBot:
             back = types.InlineKeyboardButton("<< Назад к тестам", callback_data=f'my_tests')
             markup.add(back)
 
-            db.delete_test(test_id)
+            DB_delete.delete_test(test_id)
             bot.send_message(message.chat.id, "Тест удалён.", reply_markup=markup)
 
         @bot.message_handler(commands=['about'])
@@ -1113,7 +978,8 @@ class TestBot:
                 ("/start", "старт"),
                 ("/create_test", "создать тест"),
                 ("/my_tests", "ваши тесты"),
-                ("/about", "о боте")
+                ("/about", "о боте"),
+                ("/txt_test", "отправить тест в формате txt файла")
             ]
 
             command_text = ("Здесь ты можешь создавать свои собственные тесты."
